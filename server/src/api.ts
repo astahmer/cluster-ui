@@ -1,10 +1,27 @@
-import { HttpRouter, HttpServerRequest, HttpServerResponse } from "@effect/platform"
-import { Effect } from "effect"
+import { HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "@effect/platform"
+import { Effect, Schedule, Stream } from "effect"
 import { existsSync, readFileSync } from "node:fs"
 import { join, normalize, resolve } from "node:path"
-import { makeRepo, openDb, type MessageQuery } from "./queries.ts"
+import { ActionError, assertWritable, interruptMessage, resetActivity, retryMessage } from "./actions.ts"
+import { AUTH_COOKIE, verifyToken } from "./auth.ts"
+import * as metrics from "./metrics.ts"
+import { config } from "./config.ts"
+import { makeRepo, openDb, type MessageQuery, type Repo } from "./queries.ts"
 
-const repo = makeRepo(openDb())
+// ------------------------------------------------------------- cluster registry
+const repos = new Map<string, Repo>(
+  config.clusters.map((c) => [c.name, makeRepo(openDb(c), c.prefix)])
+)
+const defaultRepo = repos.get(config.clusters[0].name)!
+
+/** repo list for the metrics sampler */
+export const clusterRepos = (): ReadonlyArray<[string, Repo]> => [...repos.entries()]
+
+/** resolve ?cluster= against the registry; null when unknown */
+function repoFor(name: string | undefined): Repo | null {
+  if (!name) return defaultRepo
+  return repos.get(name) ?? null
+}
 
 // ---------------------------------------------------------------- static UI --
 // If the built frontend (vite build) exists, serve it from this same process.
@@ -71,36 +88,146 @@ const req = Effect.all([HttpServerRequest.HttpServerRequest, HttpRouter.params])
   })
 )
 
-export const api = HttpRouter.empty.pipe(
+/** request + merged params + parsed JSON body */
+const reqWithBody: Effect.Effect<
+  Record<string, any>,
+  never,
+  HttpServerRequest.HttpServerRequest | HttpRouter.RouteContext
+> = Effect.all([HttpServerRequest.HttpServerRequest, HttpRouter.params]).pipe(
+  Effect.flatMap(([request, params]) =>
+    Effect.map(request.json as Effect.Effect<unknown, never, never>, (body: any) => {
+      const url = new URL(request.url, "http://localhost")
+      const query: Record<string, string> = {}
+      url.searchParams.forEach((value, key) => {
+        query[key] = value
+      })
+      return { ...query, ...params, body }
+    })
+  )
+)
+
+function actionHandler(
+  run: (repo: Repo, messageId: string) => { ok: true }
+) {
+  return Effect.map(reqWithBody, (p): HttpServerResponse.HttpServerResponse => {
+    try {
+      assertWritable(config.readonly)
+      const repo = repoFor(p.cluster ?? p.body?.cluster)
+      if (!repo) return notFound("cluster")
+      const messageId = p.body?.messageId
+      if (typeof messageId !== "string" || messageId === "") {
+        return HttpServerResponse.unsafeJson({ error: "messageId is required" }, { status: 400 })
+      }
+      run(repo, messageId)
+      return json({ ok: true })
+    } catch (e) {
+      if (e instanceof ActionError) {
+        return HttpServerResponse.unsafeJson({ error: e.message }, { status: e.status })
+      }
+      return HttpServerResponse.unsafeJson(
+        { error: e instanceof Error ? e.message : String(e) },
+        { status: 500 }
+      )
+    }
+  })
+}
+
+const baseRouter = HttpRouter.empty.pipe(
   HttpRouter.get("/healthz", HttpServerResponse.text("ok")),
 
   HttpRouter.get(
+    "/api/config",
+    Effect.succeed(
+      json({
+        clusters: [...repos.keys()],
+        tracingUrlTemplate: config.tracingUrlTemplate,
+        readonly: config.readonly
+      })
+    )
+  ),
+
+  HttpRouter.get(
+    "/api/clusters",
+    Effect.succeed(json([...repos.keys()].map((name) => ({ name }))))
+  ),
+
+  HttpRouter.get(
     "/api/overview",
-    Effect.map(req, () => json(repo.overview()))
+    Effect.map(req, (p) => {
+      const repo = repoFor(p.cluster)
+      return repo ? json(repo.overview()) : notFound("cluster")
+    })
   ),
 
   HttpRouter.get(
     "/api/runners",
-    Effect.map(req, () => json(repo.runners()))
+    Effect.map(req, (p) => {
+      const repo = repoFor(p.cluster)
+      return repo ? json(repo.runners()) : notFound("cluster")
+    })
   ),
 
   HttpRouter.get(
     "/api/shards",
-    Effect.map(req, () => json(repo.shards()))
+    Effect.map(req, (p) => {
+      const repo = repoFor(p.cluster)
+      return repo ? json(repo.shards()) : notFound("cluster")
+    })
   ),
 
   HttpRouter.get(
     "/api/entities",
-    Effect.map(req, () => json(repo.entities()))
+    Effect.map(req, (p) => {
+      const repo = repoFor(p.cluster)
+      return repo ? json(repo.entities()) : notFound("cluster")
+    })
+  ),
+
+  HttpRouter.get(
+    "/api/entity-instances",
+    Effect.map(req, (p) => {
+      const repo = repoFor(p.cluster)
+      if (!repo || !p.entityType) return notFound(p.entityType ? "cluster" : "entityType")
+      return json(
+        repo.entityInstances(decodeURIComponent(p.entityType), {
+          q: p.q,
+          page: intParam(p.page),
+          pageSize: intParam(p.pageSize)
+        })
+      )
+    })
+  ),
+
+  HttpRouter.get(
+    "/api/crons",
+    Effect.map(req, (p) => {
+      const repo = repoFor(p.cluster)
+      return repo ? json(repo.crons()) : notFound("cluster")
+    })
   ),
 
   HttpRouter.get(
     "/api/messages",
     Effect.map(req, (p): HttpServerResponse.HttpServerResponse => {
+      const repo = repoFor(p.cluster)
+      if (!repo) return notFound("cluster")
+      const failedParam = p.failed
       const query: MessageQuery = {
         status: p.status,
         entityType: p.entityType,
+        entityId: p.entityId,
         q: p.q,
+        failed:
+          failedParam === undefined ?
+            undefined :
+            failedParam === "true" ?
+              true :
+              failedParam === "false" ?
+                false :
+                undefined,
+        createdAfter: intParam(p.createdAfter),
+        createdBefore: intParam(p.createdBefore),
+        sort: p.sort === "deliverAt" ? "deliverAt" : undefined,
         page: intParam(p.page),
         pageSize: intParam(p.pageSize)
       }
@@ -111,6 +238,8 @@ export const api = HttpRouter.empty.pipe(
   HttpRouter.get(
     "/api/messages/:id",
     Effect.map(req, (p) => {
+      const repo = repoFor(p.cluster)
+      if (!repo) return notFound("cluster")
       const result = repo.getMessage(p.id!)
       return result ? json(result) : notFound("message")
     })
@@ -118,20 +247,102 @@ export const api = HttpRouter.empty.pipe(
 
   HttpRouter.get(
     "/api/workflows",
-    Effect.map(req, () => json(repo.workflows()))
+    Effect.map(req, (p) => {
+      const repo = repoFor(p.cluster)
+      return repo ? json(repo.workflows()) : notFound("cluster")
+    })
   ),
 
   HttpRouter.get(
     "/api/workflows/:name",
-    Effect.map(req, (p) => json(repo.workflowRuns(decodeURIComponent(p.name!))))
+    Effect.map(req, (p) => {
+      const repo = repoFor(p.cluster)
+      return repo ? json(repo.workflowRuns(decodeURIComponent(p.name!))) : notFound("cluster")
+    })
   ),
 
   HttpRouter.get(
     "/api/workflows/:name/:executionId",
     Effect.map(req, (p) => {
+      const repo = repoFor(p.cluster)
+      if (!repo) return notFound("cluster")
       const result = repo.workflowRun(decodeURIComponent(p.name!), decodeURIComponent(p.executionId!))
       return result ? json(result) : notFound("workflow run")
     })
+  ),
+
+  // ------------------------------------------------------------------ actions
+  HttpRouter.post("/api/actions/retry", actionHandler((repo, id) => retryMessage(repo.db, repo.prefix, id))),
+  HttpRouter.post(
+    "/api/actions/interrupt",
+    actionHandler((repo, id) => interruptMessage(repo.db, repo.prefix, id))
+  ),
+  HttpRouter.post(
+    "/api/actions/reset-activity",
+    actionHandler((repo, id) => resetActivity(repo.db, repo.prefix, id))
+  ),
+
+)
+
+export const api = baseRouter.pipe(
+  // ------------------------------------------------------- metrics & realtime
+  HttpRouter.get(
+    "/api/metrics/history",
+    Effect.map(req, (p) => {
+      const h = metrics.history(p.cluster)
+      return h === null ? notFound("cluster") : json(h)
+    })
+  ),
+
+  HttpRouter.get(
+    "/api/events",
+    Effect.map(req, (p) => {
+      const repo = repoFor(p.cluster) ?? defaultRepo
+      const encoder = new TextEncoder()
+      const frame = () => {
+        let payload: unknown
+        try {
+          payload = repo.overview()
+        } catch (e) {
+          payload = { error: String(e) }
+        }
+        return encoder.encode(`event: overview\ndata: ${JSON.stringify(payload)}\n\n`)
+      }
+      // initial snapshot immediately, then every 5s; the request scope
+      // interrupts the stream when the client disconnects
+      const stream = Stream.concat(
+        Stream.make(frame()),
+        Stream.fromSchedule(Schedule.spaced("5 seconds")).pipe(Stream.map(() => frame()))
+      )
+      return HttpServerResponse.stream(stream, {
+        contentType: "text/event-stream",
+        headers: { "cache-control": "no-store", "x-accel-buffering": "no" }
+      })
+    })
+  ),
+
+  HttpRouter.post(
+    "/api/auth",
+    Effect.map(HttpServerRequest.HttpServerRequest, (req) =>
+      Effect.map(
+        req.json,
+        (body: any) => {
+          const verdict = verifyToken(body?.token)
+          if (!verdict.ok) {
+            return HttpServerResponse.unsafeJson({ error: verdict.error }, {
+              status: verdict.status,
+              headers: { "cache-control": "no-store" }
+            })
+          }
+          return HttpServerResponse.unsafeJson({ ok: true }, {
+            headers: {
+              "cache-control": "no-store",
+              "set-cookie": `${AUTH_COOKIE}=${encodeURIComponent(verdict.ok ? body.token : "")}; Path=/; HttpOnly; SameSite=Lax`
+            }
+          })
+        }
+      )
+    ).pipe(Effect.flatten)
   ),
 
   HttpRouter.get(

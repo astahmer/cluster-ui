@@ -155,7 +155,9 @@ const seed = db.transaction(() => {
   const runners = [
     { host: "10.0.4.11", port: 8080, groups: ["api"], version: 2 },
     { host: "10.0.4.12", port: 8080, groups: ["api"], version: 2 },
-    { host: "10.0.4.13", port: 8080, groups: ["worker"], version: 1 }
+    { host: "10.0.4.13", port: 8080, groups: ["worker"], version: 1 },
+    // registered but owns no shards — shows up as STALE in the UI
+    { host: "10.0.4.14", port: 8080, groups: ["worker"], version: 1 }
   ]
   runners.forEach((r) => {
     const address = `${r.host}:${r.port}`
@@ -164,7 +166,7 @@ const seed = db.transaction(() => {
       JSON.stringify({ _id: "Runner", address: { _id: "RunnerAddress", host: r.host, port: r.port }, groups: r.groups, version: r.version })
     )
   })
-  const addresses = runners.map((r) => `${r.host}:${r.port}`)
+  const addresses = runners.slice(0, 3).map((r) => `${r.host}:${r.port}`)
 
   // ---- shards ---------------------------------------------------------------
   for (let i = 0; i < SHARD_COUNT; i++) {
@@ -241,6 +243,46 @@ const seed = db.transaction(() => {
     addDone("Cart", c, "AddItem", { sku: `SKU-${i}`, qty: 1 }, i + 1, null)
     addDone("Cart", c, "Checkout", {}, i + 0.5, { orderId: `ord_${i}` })
   })
+
+  // ---- failed messages ------------------------------------------------------
+  const addFailed = (entityType: string, entityId: string, tag: string, payload: unknown, hoursAgo: number, defect: unknown) => {
+    const id = pastSnowflake(Date.now() - hoursAgo * 3600_000, 15 * mid)
+    const msg = baseMessage({ id, entityType, entityId, tag, payload, processed: true, hoursAgo })
+    insertMessage.run(msg)
+    insertReply.run({
+      id: Date.now() % 1_000_000_000 + mid * 1000 + 900,
+      kind: 0,
+      request_id: String(msg.id),
+      payload: JSON.stringify({ _tag: "Failure", defect }),
+      sequence: null,
+      acked: 1
+    })
+    mid++
+  }
+  addFailed(
+    "Payment",
+    "card_5555",
+    "ChargeCard",
+    { amountCents: 4999, currency: "EUR" },
+    3,
+    { _tag: "Fail", error: { reason: "card_declined", issuerMessage: "Insufficient funds" } }
+  )
+  addFailed(
+    "Payment",
+    "card_5555",
+    "Refund",
+    { orderId: "ord_42" },
+    2.5,
+    { _tag: "Die", defect: "HttpStatusCodeError: upstream 503 after 3 attempts" }
+  )
+  addFailed(
+    "Session",
+    "sess_0037",
+    "Expire",
+    {},
+    1.2,
+    { _tag: "Fail", error: { reason: "redis_unavailable" } }
+  )
 
   // ---- workflows --------------------------------------------------------------
   // Workflow runs appear as entities of type "Workflow/<name>" where the
@@ -335,6 +377,91 @@ const seed = db.transaction(() => {
         }
       })
     })
+  }
+  // ---- a failed workflow run -------------------------------------------------
+  {
+    const entityType = "Workflow/PaymentWorkflow"
+    const executionId = "payment-exec-1"
+    const runId = pastSnowflake(Date.now() - 4 * 3600_000, 17 * mid)
+    insertMessage.run(
+      baseMessage({
+        id: runId,
+        entityType,
+        entityId: executionId,
+        tag: "run",
+        payload: { input: { orderId: "ord_42" } },
+        processed: true,
+        hoursAgo: 4
+      })
+    )
+    insertReply.run({
+      id: Date.now() % 1_000_000_000 + mid * 1000 + 950,
+      kind: 0,
+      request_id: String(runId),
+      payload: JSON.stringify({ _tag: "Failure", defect: { _tag: "Fail", error: { step: "chargeCard", reason: "card_declined" } } }),
+      sequence: null,
+      acked: 1
+    })
+    mid++
+
+    // its failing activity (attempt 2 visible in the payload, like the engine writes it)
+    const activityMsg = baseMessage({
+      id: pastSnowflake(Date.now() - 3.8 * 3600_000, 19 * mid),
+      entityType,
+      entityId: executionId,
+      tag: "activity",
+      payload: { name: "chargeCard", attempt: 2 },
+      processed: true,
+      hoursAgo: 3.8
+    })
+    insertMessage.run(activityMsg)
+    insertReply.run({
+      id: Date.now() % 1_000_000_000 + mid * 1000 + 951,
+      kind: 0,
+      request_id: String(activityMsg.id),
+      payload: JSON.stringify({ _tag: "Failure", defect: { _tag: "Fail", error: { reason: "card_declined", issuerMessage: "Do not honor" } } }),
+      sequence: null,
+      acked: 1
+    })
+    mid++
+  }
+
+  // ---- cron jobs (@effect/cluster ClusterCron entities) ----------------------
+  // entityId is "" (the engine's PrimaryKey for the cron entity); each scheduled
+  // fire is a message whose deliver_at carries the next fire time.
+  const crons: Array<{ name: string; pastRuns: number; intervalMinutes: number }> = [
+    { name: "NightlyCleanup", pastRuns: 5, intervalMinutes: 24 * 60 },
+    { name: "HourlySync", pastRuns: 12, intervalMinutes: 60 }
+  ]
+  for (const job of crons) {
+    const entityType = `ClusterCron/${job.name}`
+    for (let i = 0; i < job.pastRuns; i++) {
+      insertMessage.run(
+        baseMessage({
+          id: pastSnowflake(Date.now() - (i + 1) * job.intervalMinutes * 60_000, 21 * mid),
+          entityType,
+          entityId: "",
+          tag: "run",
+          payload: { dateTime: new Date(Date.now() - (i + 1) * job.intervalMinutes * 60_000).toISOString() },
+          processed: true,
+          hoursAgo: ((i + 1) * job.intervalMinutes) / 60
+        })
+      )
+      mid++
+    }
+    // next scheduled fire
+    insertMessage.run(
+      baseMessage({
+        id: pastSnowflake(Date.now(), 23 * mid),
+        entityType,
+        entityId: "",
+        tag: "run",
+        payload: { dateTime: new Date(Date.now() + job.intervalMinutes * 60_000).toISOString() },
+        deliverAt: Date.now() + job.intervalMinutes * 60_000,
+        hoursAgo: 0.01
+      })
+    )
+    mid++
   }
 })
 

@@ -1,5 +1,5 @@
 import Database from "better-sqlite3"
-import { config, decodeSnowflake } from "./config.ts"
+import { config, decodeSnowflake, SNOWFLAKE_EPOCH, type ClusterProfile } from "./config.ts"
 
 export type MessageStatus = "pending" | "inflight" | "scheduled" | "done"
 
@@ -24,8 +24,8 @@ export function statusOf(row: {
   return "pending"
 }
 
-export function openDb(): Database.Database {
-  const db = new Database(config.dbFile, { readonly: config.readonly })
+export function openDb(profile?: ClusterProfile): Database.Database {
+  const db = new Database(profile?.dbFile ?? config.dbFile, { readonly: config.readonly })
   db.pragma("journal_mode = WAL")
   return db
 }
@@ -33,7 +33,14 @@ export function openDb(): Database.Database {
 export interface MessageQuery {
   status?: string
   entityType?: string
+  entityId?: string
   q?: string
+  /** "true" / "false" — filter on failure exit replies */
+  failed?: string | boolean
+  /** epoch millis, inclusive */
+  createdAfter?: number
+  createdBefore?: number
+  sort?: "id" | "deliverAt"
   page?: number
   pageSize?: number
 }
@@ -49,6 +56,7 @@ export interface MessageView {
   traceId: string | null
   processed: boolean
   status: MessageStatus
+  failed: boolean
   lastRead: string | null
   deliverAt: number | null
   createdAt: number
@@ -71,11 +79,18 @@ interface RawMessageRow {
   readonly last_read: string | null
   readonly deliver_at: number | bigint | null
   readonly reply_count?: number
+  readonly failed_flag?: number
 }
 
 function kindName(kind: number): string {
   return kind === 0 ? "request" : kind === 1 ? "ack" : kind === 2 ? "interrupt" : `kind:${kind}`
 }
+
+/** SQL fragment + params detecting a Failure WithExit reply for m.* / the aliased message */
+// WithExit reply payloads ARE the exit object: { _tag: "Success", value } /
+// { _tag: "Failure", defect } (see SqlMessageStorage.replyToRow)
+const FAILED_EXISTS_SQL =
+  "EXISTS(SELECT 1 FROM %REPLIES% r WHERE r.request_id = %.ID% AND r.kind = 0 AND json_extract(r.payload,'$._tag') = 'Failure')"
 
 function toMessageView(row: RawMessageRow): MessageView {
   const { createdAt, machineId } = decodeSnowflake(String(row.id))
@@ -94,6 +109,7 @@ function toMessageView(row: RawMessageRow): MessageView {
       deliverAt: row.deliver_at === null ? null : Number(row.deliver_at),
       lastRead: row.last_read
     }),
+    failed: Number(row.failed_flag ?? 0) === 1,
     lastRead: row.last_read ?? null,
     deliverAt: row.deliver_at === null ? null : Number(row.deliver_at),
     createdAt,
@@ -111,42 +127,66 @@ function safeJson(s: string | null): unknown {
   }
 }
 
+/**
+ * Extracts the execution outcome from WithExit replies of a message.
+ * Exit payloads are `{ _tag: "Success", value }` or `{ _tag: "Failure", defect }`.
+ */
+export function extractResult(
+  replies: ReadonlyArray<{ kind: string; payload: unknown }>
+): { outcome: "Success" | "Failure"; value: unknown; exit: Record<string, unknown> } | null {
+  const withExit = replies.find((r) => r.kind === "withExit")
+  if (!withExit || typeof withExit.payload !== "object" || withExit.payload === null) return null
+  const exit = withExit.payload as Record<string, unknown>
+  const outcome = exit._tag === "Failure" ? "Failure" : exit._tag === "Success" ? "Success" : null
+  if (outcome === null) return null
+  return {
+    outcome,
+    value: outcome === "Success" ? exit.value : (exit.defect ?? exit.cause ?? exit.error ?? null),
+    exit
+  }
+}
+
 /** All query helpers take the opened database; they are synchronous & fast. */
-export function makeRepo(db: Database.Database) {
+export function makeRepo(db: Database.Database, prefix: string = config.prefix) {
   const t = {
-    messages: `${config.prefix}_messages`,
-    replies: `${config.prefix}_replies`,
-    shards: `${config.prefix}_shards`,
-    runners: `${config.prefix}_runners`
+    messages: `${prefix}_messages`,
+    replies: `${prefix}_replies`,
+    shards: `${prefix}_shards`,
+    runners: `${prefix}_runners`
   }
 
   // inflight cutoff as a sqlite-comparable UTC string
   const cutoff = () => new Date(Date.now() - INFLIGHT_WINDOW_MS).toISOString().slice(0, 19).replace("T", " ")
 
+  const failedExistsFor = (idExpr: string) =>
+    FAILED_EXISTS_SQL.replace("%REPLIES%", t.replies).replace("%.ID%", `m.${idExpr}`)
+
   const listMessages = (query: MessageQuery) => {
-    const conditions: string[] = []
-    const params: unknown[] = []
-    if (query.status === "done") conditions.push("m.processed = 1")
-    else if (query.status === "pending") conditions.push(`m.processed = 0 AND (m.deliver_at IS NULL OR m.deliver_at <= ?)`)
-    else if (query.status === "scheduled") conditions.push(`m.processed = 0 AND m.deliver_at IS NOT NULL AND m.deliver_at > ?`)
-    else if (query.status === "inflight")
-      conditions.push(`m.processed = 0 AND m.last_read IS NOT NULL AND m.last_read > ?`)
-    if (query.entityType) {
-      conditions.push("m.entity_type = ?")
-      params.push(query.entityType)
-    }
-    if (query.q) {
-      conditions.push("(m.entity_id LIKE ? OR m.tag LIKE ? OR CAST(m.id AS TEXT) LIKE ?)")
-      params.push(`%${query.q}%`, `%${query.q}%`, `%${query.q}%`)
-    }
-    const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : ""
+    // [sql, ...params] pairs kept together so placeholder order is always correct
+    const conds: Array<[string, ...unknown[]]> = []
+    if (query.status === "done") conds.push(["m.processed = 1"])
+    else if (query.status === "pending") conds.push(["m.processed = 0 AND (m.deliver_at IS NULL OR m.deliver_at <= ?)", Date.now()])
+    else if (query.status === "scheduled") conds.push(["m.processed = 0 AND m.deliver_at IS NOT NULL AND m.deliver_at > ?", Date.now()])
+    else if (query.status === "inflight") conds.push(["m.processed = 0 AND m.last_read IS NOT NULL AND m.last_read > ?", cutoff()])
+    if (query.entityType) conds.push(["m.entity_type = ?", query.entityType])
+    if (query.entityId) conds.push(["m.entity_id = ?", query.entityId])
+    if (query.q)
+      conds.push([
+        "(m.entity_id LIKE ? OR m.tag LIKE ? OR CAST(m.id AS TEXT) LIKE ?)",
+        `%${query.q}%`,
+        `%${query.q}%`,
+        `%${query.q}%`
+      ])
+    if (query.failed === true || query.failed === "true") conds.push([failedExistsFor("id")])
+    if (query.failed === false || query.failed === "false") conds.push([`NOT ${failedExistsFor("id")}`])
+    if (query.createdAfter !== undefined) conds.push(["m.id >= ?", snowflakeFloor(query.createdAfter)])
+    if (query.createdBefore !== undefined) conds.push(["m.id <= ?", snowflakeCeil(query.createdBefore)])
+
+    const where = conds.length > 0 ? `WHERE ${conds.map(([c]) => c).join(" AND ")}` : ""
+    const params = conds.flatMap(([, ...vals]) => vals)
     const pageSize = Math.min(Math.max(query.pageSize ?? 50, 1), 200)
     const page = Math.max(query.page ?? 1, 1)
-
-    // time-dependent params first, then filter params (order matches conditions)
-    if (query.status === "pending") params.unshift(Date.now())
-    if (query.status === "scheduled") params.unshift(Date.now())
-    if (query.status === "inflight") params.unshift(cutoff())
+    const order = query.sort === "deliverAt" ? "ORDER BY (m.deliver_at IS NULL), m.deliver_at ASC, m.id DESC" : "ORDER BY m.id DESC"
 
     const total = Number(
       (db.prepare(`SELECT COUNT(*) as total FROM ${t.messages} m ${where}`).get(...params) as any)
@@ -156,9 +196,10 @@ export function makeRepo(db: Database.Database) {
       .prepare(
         `SELECT CAST(m.id AS TEXT) as id, m.message_id, m.shard_id, m.entity_type, m.entity_id,
            m.kind, m.tag, m.payload, m.headers, m.trace_id, m.processed, m.last_read, m.deliver_at,
+           (${failedExistsFor("id")}) as failed_flag,
            (SELECT COUNT(*) FROM ${t.replies} r WHERE r.request_id = m.id) as reply_count
          FROM ${t.messages} m ${where}
-         ORDER BY m.id DESC LIMIT ? OFFSET ?`
+         ${order} LIMIT ? OFFSET ?`
       )
       .all(...params, pageSize, (page - 1) * pageSize) as ReadonlyArray<RawMessageRow>
     return { rows: rows.map(toMessageView), total, page, pageSize }
@@ -166,8 +207,9 @@ export function makeRepo(db: Database.Database) {
 
   const getMessage = (id: string) => {
     const row = db.prepare(`SELECT CAST(id AS TEXT) as id, message_id, shard_id, entity_type, entity_id,
-       kind, tag, payload, headers, trace_id, processed, last_read, deliver_at
-     FROM ${t.messages} WHERE CAST(id AS TEXT) = ?`).get(id) as
+       kind, tag, payload, headers, trace_id, processed, last_read, deliver_at,
+       (${failedExistsFor("id")}) as failed_flag
+     FROM ${t.messages} m WHERE CAST(m.id AS TEXT) = ?`).get(id) as
       | RawMessageRow
       | undefined
     if (!row) return null
@@ -179,24 +221,26 @@ export function makeRepo(db: Database.Database) {
       .all(id) as ReadonlyArray<{
       rid: string
       requestId: string
-      kind: number
+      kind: number | null
       payload: string
       sequence: number | null
       acked: number
     }>
+    const mappedReplies = replies.map((r) => ({
+      id: r.rid,
+      requestId: r.requestId,
+      kind:
+        Number(r.kind) === 0 ? "withExit" : r.kind === null ? "chunk" : `kind:${r.kind}`,
+      payload: safeJson(r.payload),
+      sequence: r.sequence,
+      acked: Boolean(r.acked)
+    }))
     return {
       message: toMessageView(row),
       payload: safeJson(row.payload),
       headers: safeJson(row.headers),
-      replies: replies.map((r) => ({
-        id: r.rid,
-        requestId: r.requestId,
-        kind:
-          Number(r.kind) === 0 ? "withExit" : r.kind === null ? "chunk" : `kind:${r.kind}`,
-        payload: safeJson(r.payload),
-        sequence: r.sequence,
-        acked: Boolean(r.acked)
-      }))
+      result: extractResult(mappedReplies),
+      replies: mappedReplies
     }
   }
 
@@ -208,8 +252,9 @@ export function makeRepo(db: Database.Database) {
           SUM(CASE WHEN processed = 1 THEN 1 ELSE 0 END) as done,
           SUM(CASE WHEN processed = 0 AND deliver_at IS NOT NULL AND deliver_at > ? THEN 1 ELSE 0 END) as scheduled,
           SUM(CASE WHEN processed = 0 AND last_read IS NOT NULL AND last_read > ? THEN 1 ELSE 0 END) as inflight,
-          SUM(CASE WHEN processed = 0 THEN 1 ELSE 0 END) as unprocessed
-        FROM ${t.messages}`
+          SUM(CASE WHEN processed = 0 THEN 1 ELSE 0 END) as unprocessed,
+          SUM(CASE WHEN ${failedExistsFor("id")} THEN 1 ELSE 0 END) as failed
+        FROM ${t.messages} m`
       )
       .get(now, cutoff()) as any
     const shards = db.prepare(`SELECT COUNT(*) as total, COUNT(address) as assigned FROM ${t.shards}`).get() as any
@@ -231,15 +276,19 @@ export function makeRepo(db: Database.Database) {
     const pending = Number(c?.unprocessed ?? 0)
     const scheduled = Number(c?.scheduled ?? 0)
     const inflight = Number(c?.inflight ?? 0)
+    const shardTotal = Number(shards?.total ?? 0)
+    const assigned = Number(shards?.assigned ?? 0)
     return {
       messages: {
         pending: pending - scheduled - inflight,
         inflight,
         scheduled,
-        done: Number(c?.done ?? 0)
+        done: Number(c?.done ?? 0),
+        failed: Number(c?.failed ?? 0)
       },
       runners: { total: Number(runners?.total ?? 0) },
-      shards: { total: Number(shards?.total ?? 0), assigned: Number(shards?.assigned ?? 0) },
+      shards: { total: shardTotal, assigned },
+      unassignedShards: shardTotal - assigned,
       topEntities: topEntities.map((e: any) => ({
         entityType: e.entityType,
         total: Number(e.total),
@@ -263,13 +312,15 @@ export function makeRepo(db: Database.Database) {
       try {
         runner = JSON.parse(r.runner)
       } catch {}
+      const shards = Number(r.shards)
       return {
         address: r.address,
         host: runner?.address?.host ?? null,
         port: runner?.address?.port ?? null,
         groups: runner?.groups ?? [],
         version: runner?.version ?? null,
-        shards: Number(r.shards)
+        shards,
+        stale: shards === 0
       }
     })
   }
@@ -307,16 +358,118 @@ export function makeRepo(db: Database.Database) {
     }))
   }
 
+  /** per-entity-id breakdown within one entity type */
+  const entityInstances = (
+    entityType: string,
+    opts: { q?: string; page?: number; pageSize?: number } = {}
+  ) => {
+    const conds: Array<[string, ...unknown[]]> = [["m.entity_type = ?", entityType]]
+    if (opts.q) conds.push(["m.entity_id LIKE ?", `%${opts.q}%`])
+    const where = `WHERE ${conds.map(([c]) => c).join(" AND ")}`
+    const params = conds.flatMap(([, ...vals]) => vals)
+    const pageSize = Math.min(Math.max(opts.pageSize ?? 50, 1), 200)
+    const page = Math.max(opts.page ?? 1, 1)
+
+    const inner = `
+      SELECT m.entity_id as entityId,
+        COUNT(*) as total,
+        SUM(CASE WHEN m.processed = 1 THEN 1 ELSE 0 END) as done,
+        SUM(CASE WHEN m.processed = 0 AND m.deliver_at IS NOT NULL AND m.deliver_at > ${Date.now()} THEN 1 ELSE 0 END) as scheduled,
+        SUM(CASE WHEN m.processed = 0 AND m.last_read IS NOT NULL AND m.last_read > '${cutoff()}' THEN 1 ELSE 0 END) as inflight,
+        SUM(CASE WHEN ${FAILED_EXISTS_SQL.replace("%REPLIES%", t.replies).replace("%.ID%", "m.id")} THEN 1 ELSE 0 END) as failed,
+        MAX(CAST(m.id AS TEXT)) as lastId
+      FROM ${t.messages} m ${where}
+      GROUP BY m.entity_id`
+
+    const total = Number(
+      (db.prepare(`SELECT COUNT(*) as total FROM (${inner})`).get(...params) as any)?.total ?? 0
+    )
+    const rows = db
+      .prepare(`SELECT * FROM (${inner}) ORDER BY lastId DESC LIMIT ? OFFSET ?`)
+      .all(...params, pageSize, (page - 1) * pageSize) as any[]
+    return {
+      rows: rows.map((r) => {
+        const done = Number(r.done ?? 0)
+        const scheduledN = Number(r.scheduled ?? 0)
+        const inflightN = Number(r.inflight ?? 0)
+        return {
+          entityId: String(r.entityId),
+          total: Number(r.total),
+          pending: Number(r.total) - done - scheduledN - inflightN,
+          inflight: inflightN,
+          scheduled: scheduledN,
+          done,
+          failed: Number(r.failed ?? 0),
+          lastActivityAt: r.lastId ? decodeSnowflake(String(r.lastId)).createdAt : null
+        }
+      }),
+      total,
+      page,
+      pageSize
+    }
+  }
+
+  /** cron jobs persisted by @effect/cluster's ClusterCron (entities "ClusterCron/<name>") */
+  const crons = () => {
+    const now = Date.now()
+    const rows = db
+      .prepare(
+        `SELECT SUBSTR(entity_type, 13) as name, entity_type as entityType,
+           CAST(id AS TEXT) as id, processed, deliver_at
+         FROM ${t.messages} WHERE entity_type LIKE 'ClusterCron/%'
+         ORDER BY id ASC`
+      )
+      .all() as any[]
+    const byJob = new Map<string, any>()
+    for (const r of rows) {
+      let job = byJob.get(r.entityType)
+      if (!job) {
+        job = {
+          name: r.name,
+          entityType: r.entityType,
+          lastRunAt: null,
+          nextRunAt: null,
+          newestId: null as string | null,
+          lastProcessed: 0
+        }
+        byJob.set(r.entityType, job)
+      }
+      job.newestId = String(r.id)
+      job.lastProcessed = Number(r.processed)
+      if (Number(r.processed) === 1) {
+        const at = decodeSnowflake(String(r.id)).createdAt
+        job.lastRunAt = Math.max(job.lastRunAt ?? 0, at)
+      }
+      if (Number(r.processed) === 0 && r.deliver_at !== null && r.deliver_at !== undefined) {
+        const at = Number(r.deliver_at)
+        job.nextRunAt = job.nextRunAt === null ? at : Math.min(job.nextRunAt, at)
+      }
+    }
+    return [...byJob.values()].map((j) => ({
+      name: j.name as string,
+      entityType: j.entityType as string,
+      lastRunAt: j.lastRunAt as number | null,
+      nextRunAt: j.nextRunAt as number | null,
+      // status of the most recent fire (done vs pending); failure detail lives on the message
+      lastStatus:
+        j.newestId !== null ?
+          statusOf({ processed: j.lastProcessed, deliverAt: null, lastRead: null }) :
+          ("pending" satisfies MessageStatus),
+      overdue: j.nextRunAt !== null && j.nextRunAt < now
+    }))
+  }
+
   const workflows = () => {
     const rows = db
       .prepare(
         `SELECT SUBSTR(entity_type, 10) as name,
           COUNT(DISTINCT entity_id) as runs,
-          SUM(CASE WHEN tag = 'run' AND processed = 1 THEN 1 ELSE 0 END) as completedRuns,
-          SUM(CASE WHEN tag = 'run' AND processed = 0 THEN 1 ELSE 0 END) as activeRuns,
-          MAX(CAST(id AS TEXT)) as lastId
-        FROM ${t.messages} WHERE entity_type LIKE 'Workflow/%'
-        GROUP BY entity_type ORDER BY name`
+          SUM(CASE WHEN m.tag = 'run' AND m.processed = 1 THEN 1 ELSE 0 END) as completedRuns,
+          SUM(CASE WHEN m.tag = 'run' AND m.processed = 0 THEN 1 ELSE 0 END) as activeRuns,
+          SUM(CASE WHEN m.tag = 'run' AND ${failedExistsFor("id")} THEN 1 ELSE 0 END) as failedRuns,
+          MAX(CAST(m.id AS TEXT)) as lastId
+        FROM ${t.messages} m WHERE m.entity_type LIKE 'Workflow/%'
+        GROUP BY m.entity_type ORDER BY name`
       )
       .all() as any[]
     return rows.map((r) => ({
@@ -324,6 +477,7 @@ export function makeRepo(db: Database.Database) {
       runs: Number(r.runs),
       completedRuns: Number(r.completedRuns ?? 0),
       activeRuns: Number(r.activeRuns ?? 0),
+      failedRuns: Number(r.failedRuns ?? 0),
       lastActivityAt: r.lastId ? decodeSnowflake(String(r.lastId)).createdAt : null
     }))
   }
@@ -331,26 +485,30 @@ export function makeRepo(db: Database.Database) {
   const workflowRuns = (name: string) => {
     const rows = db
       .prepare(
-        `SELECT CAST(m.id AS TEXT) as id, m.entity_id as executionId, m.processed, m.last_read, m.deliver_at,
+        `SELECT CAST(m.id AS TEXT) as id, m.entity_id as entity_id, m.entity_type as entity_type,
+           m.message_id, m.shard_id,
+           m.kind, m.tag, m.payload, m.headers, m.trace_id, m.processed, m.last_read, m.deliver_at,
+           (${failedExistsFor("id")}) as failed_flag,
            (SELECT COUNT(*) FROM ${t.replies} r WHERE r.request_id = m.id) as reply_count
          FROM ${t.messages} m
          WHERE m.entity_type = ? AND m.tag = 'run'
          ORDER BY m.id DESC`
       )
-      .all(`Workflow/${name}`) as any[]
+      .all(`Workflow/${name}`) as unknown as RawMessageRow[]
     return rows.map((r) => {
       const view = toMessageView({
         ...r,
         kind: 0,
         tag: "run",
         entity_type: `Workflow/${name}`
-      } as RawMessageRow)
+      })
       return {
-        executionId: r.executionId as string,
+        executionId: String(view.entityId),
         runMessageId: String(r.id),
         status: view.status,
+        failed: view.failed,
         createdAt: view.createdAt,
-        activityCount: Number(r.reply_count)
+        activityCount: Number(r.reply_count ?? 0)
       }
     })
   }
@@ -359,10 +517,11 @@ export function makeRepo(db: Database.Database) {
     const rows = db
       .prepare(
         `SELECT CAST(id AS TEXT) as id, message_id, shard_id, entity_type, entity_id,
-           kind, tag, payload, headers, trace_id, processed, last_read, deliver_at
-         FROM ${t.messages}
-         WHERE entity_type = ? AND entity_id = ?
-         ORDER BY id`
+           kind, tag, payload, headers, trace_id, processed, last_read, deliver_at,
+           (${failedExistsFor("id")}) as failed_flag
+         FROM ${t.messages} m
+         WHERE m.entity_type = ? AND m.entity_id = ?
+         ORDER BY m.id`
       )
       .all(`Workflow/${name}`, executionId) as unknown as RawMessageRow[]
     if (rows.length === 0) return null
@@ -371,6 +530,14 @@ export function makeRepo(db: Database.Database) {
       .filter((r) => r.tag !== "run")
       .map((r) => {
         const { createdAt } = decodeSnowflake(String(r.id))
+        const payload = safeJson(r.payload)
+        // ActivityRpc payloads carry { name, attempt } for durable activities
+        let attempt: number | undefined
+        let activityName: string | undefined
+        if (payload && typeof payload === "object" && "attempt" in (payload as any)) {
+          attempt = Number((payload as any).attempt)
+          activityName = (payload as any).name
+        }
         return {
           id: String(r.id),
           tag: r.tag,
@@ -380,26 +547,44 @@ export function makeRepo(db: Database.Database) {
             deliverAt: r.deliver_at === null ? null : Number(r.deliver_at),
             lastRead: r.last_read
           }),
-          payload: safeJson(r.payload),
+          failed: Number(r.failed_flag ?? 0) === 1,
+          activityName,
+          attempt,
+          payload,
           createdAt
         }
       })
     const run = runRow ?
-      {
-        ...toMessageView({ ...runRow, entity_type: `Workflow/${name}`, entity_id: executionId }),
-        payload: safeJson(runRow.payload)
-      } :
+      (() => {
+        const view = toMessageView({ ...runRow, entity_type: `Workflow/${name}`, entity_id: executionId })
+        const runReplies = db
+          .prepare(`SELECT kind, payload FROM ${t.replies} WHERE CAST(request_id AS TEXT) = ?`)
+          .all(runRow.id) as ReadonlyArray<{ kind: number | null; payload: string }>
+        const mapped = runReplies.map((r) => ({
+          kind: Number(r.kind) === 0 ? "withExit" : r.kind === null ? "chunk" : `kind:${r.kind}`,
+          payload: safeJson(r.payload)
+        }))
+        return {
+          ...view,
+          payload: safeJson(runRow.payload),
+          result: extractResult(mapped)
+        }
+      })() :
       null
     return { run, activities }
   }
 
   return {
+    db,
+    prefix,
     listMessages,
     getMessage,
     overview,
     runners,
     shards,
     entities,
+    entityInstances,
+    crons,
     workflows,
     workflowRuns,
     workflowRun
@@ -407,3 +592,15 @@ export function makeRepo(db: Database.Database) {
 }
 
 export type Repo = ReturnType<typeof makeRepo>
+
+/** largest snowflake that could have been created at or before the given epoch ms */
+function snowflakeCeil(atMs: number): string {
+  return String(((BigInt(Math.max(atMs, SNOWFLAKE_FLOOR_MS)) - BigInt(SNOWFLAKE_EPOCH)) << 22n) | ((1n << 22n) - 1n))
+}
+
+/** smallest snowflake that could have been created at or after the given epoch ms */
+function snowflakeFloor(atMs: number): string {
+  return String((BigInt(Math.max(atMs, SNOWFLAKE_FLOOR_MS)) - BigInt(SNOWFLAKE_EPOCH)) << 22n)
+}
+
+const SNOWFLAKE_FLOOR_MS = Date.UTC(2025, 0, 2) // ids before this are not time-decodable reliably

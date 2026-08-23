@@ -2,20 +2,27 @@ import * as React from "react"
 import { api, type MessageStatus, type Workflow, type WorkflowRun } from "../api.ts"
 import { ActivityDot } from "../components/pieces.tsx"
 import { Badge, Card, CardContent, Table, TBody, TD, TH, THead, TR } from "../components/ui.tsx"
-import { ErrorNote, PageHeader, usePolling } from "../shell.tsx"
+import { ErrorNote, PageHeader, useLive } from "../shell.tsx"
 import { StatusBadge } from "../components/pieces.tsx"
 import { WorkflowRunPage } from "./WorkflowRunDetail.tsx"
 
+/** server rows also carry `failed` (Failure WithExit reply on the run message) */
+type RunRow = WorkflowRun & { failed?: boolean }
+
 export function WorkflowListPage() {
   const [rows, setRows] = React.useState<Workflow[]>([])
-  const { loading, error } = usePolling(async () => setRows(await api.workflows()))
+  const { loading, error } = useLive(async () => setRows(await api.workflows()))
 
   if (loading && rows.length === 0) return null
   const totalRuns = rows.reduce((acc, w) => acc + w.runs, 0)
+  const totalFailed = rows.reduce((acc, w) => acc + (w.failedRuns ?? 0), 0)
 
   return (
     <div>
-      <PageHeader title="Workflows" subtitle={`${totalRuns} executions across ${rows.length} workflows`} />
+      <PageHeader
+        title="Workflows"
+        subtitle={`${totalRuns} executions across ${rows.length} workflows`}
+      />
       <ErrorNote error={error} />
       {rows.length === 0 ? (
         <Card>
@@ -36,7 +43,15 @@ export function WorkflowListPage() {
                 <div className="flex items-center gap-2 px-4 py-3 text-[13px]">
                   <Badge tone="ok">{w.completedRuns} completed</Badge>
                   {w.activeRuns > 0 && <Badge tone="warn">{w.activeRuns} active</Badge>}
-                  <span className="ml-auto text-muted tabular-nums">{w.runs} runs</span>
+                  {(w.failedRuns ?? 0) > 0 && (
+                    <Badge tone="err">{w.failedRuns} failed</Badge>
+                  )}
+                  <span className="ml-auto text-muted tabular-nums">
+                    {w.runs} runs
+                    {totalFailed > 0 && (w.failedRuns ?? 0) > 0 ?
+                      ` · ${Math.round(((w.failedRuns ?? 0) / w.runs) * 100)}% fail rate` :
+                      ""}
+                  </span>
                 </div>
               </a>
             </Card>
@@ -48,17 +63,16 @@ export function WorkflowListPage() {
 }
 
 export function WorkflowRunsPage({ name }: { name: string }) {
-  const [runs, setRuns] = React.useState<WorkflowRun[] | null>(null)
+  const [runs, setRuns] = React.useState<RunRow[] | null>(null)
   const [openExecution, setOpenExecution] = React.useState<string | null>(null)
-  const { error } = usePolling(async () => setRuns(await api.workflowRuns(name)))
+  const { error } = useLive(async () =>
+    setRuns((await api.workflowRuns(name)) as RunRow[])
+  )
 
   return (
     <div>
       <PageHeader title={name} subtitle="workflow executions">
-        <a
-          href="#/workflows"
-          className="text-[13px] text-muted hover:text-text"
-        >
+        <a href="#/workflows" className="text-[13px] text-muted hover:text-text">
           ← all workflows
         </a>
       </PageHeader>
@@ -77,10 +91,24 @@ export function WorkflowRunsPage({ name }: { name: string }) {
             {(runs ?? []).map((r) => (
               <TR
                 key={r.executionId}
-                className="cursor-pointer"
+                className={
+                  "cursor-pointer" +
+                  (r.failed ? " border-l-2 border-l-err hover:bg-err/5" : "")
+                }
                 onClick={() => setOpenExecution(r.executionId)}
               >
-                <TD className="font-mono text-xs">{r.executionId}</TD>
+                <TD
+                  className={
+                    "font-mono text-xs " + (r.failed ? "text-err" : r.failed === false ? "" : "")
+                  }
+                >
+                  {r.executionId}
+                  {r.failed && (
+                    <Badge tone="err" className="ml-2">
+                      failed
+                    </Badge>
+                  )}
+                </TD>
                 <TD>
                   <StatusBadge status={r.status as MessageStatus} />
                 </TD>
@@ -106,6 +134,12 @@ export function WorkflowRunsPage({ name }: { name: string }) {
           name={name}
           executionId={openExecution}
           onClose={() => setOpenExecution(null)}
+          onChanged={() => {
+            api
+              .workflowRuns(name)
+              .then((r) => setRuns(r as RunRow[]))
+              .catch(() => {})
+          }}
         />
       )}
     </div>
@@ -115,11 +149,13 @@ export function WorkflowRunsPage({ name }: { name: string }) {
 function WorkflowRunDetailModal({
   name,
   executionId,
-  onClose
+  onClose,
+  onChanged
 }: {
   name: string
   executionId: string
   onClose: () => void
+  onChanged?: () => void
 }) {
   return (
     <div className="fixed inset-0 z-40 flex justify-end bg-black/40" onClick={onClose}>
@@ -138,7 +174,7 @@ function WorkflowRunDetailModal({
             ✕ close
           </button>
         </div>
-        <WorkflowRunPage name={name} executionId={executionId} />
+        <WorkflowRunPage name={name} executionId={executionId} onChanged={onChanged} />
       </div>
     </div>
   )

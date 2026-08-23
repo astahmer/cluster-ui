@@ -1,28 +1,83 @@
 import * as React from "react"
-import { api, type Overview } from "../api.ts"
+import { api, type MetricPoint, type Overview } from "../api.ts"
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui.tsx"
+import { Sparkline } from "../components/sparkline.tsx"
 import { ActivityDot, StatCard } from "../components/pieces.tsx"
 import { Badge } from "../components/ui.tsx"
-import { ErrorNote, PageHeader, usePolling } from "../shell.tsx"
+import { ErrorNote, PageHeader, useLive } from "../shell.tsx"
 
 export function OverviewPage() {
   const [data, setData] = React.useState<Overview | null>(null)
-  const { loading, error } = usePolling(async () => setData(await api.overview()))
+  const [history, setHistory] = React.useState<MetricPoint[]>([])
 
-  if (loading && !data) return null
+  const loadOverview = React.useRef(async () => setData(await api.overview()))
+  const loadHistory = React.useRef(async () => {
+    try {
+      const points = await api.metricsHistory()
+      // tolerate older servers / mocks returning a non-array
+      setHistory(Array.isArray(points) ? points : [])
+    } catch {
+      // sampler may not be running (older server) — sparklines just stay empty
+    }
+  })
+
+  const overviewLive = useLive(() => loadOverview.current())
+  useLive(() => loadHistory.current())
+
+  if (overviewLive.loading && !data) return null
   const m = data!.messages
   const shards = data!.shards
+  const unassigned = data!.unassignedShards ?? shards.total - shards.assigned
 
   return (
     <div>
       <PageHeader title="Overview" subtitle="live cluster state" />
-      <ErrorNote error={error} />
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <ErrorNote error={overviewLive.error} />
+
+      {unassigned > 0 && (
+        <div className="mb-3 flex items-center justify-between rounded-md border border-err/40 bg-err/10 px-3 py-2 text-[13px] text-err">
+          <span>
+            <strong>{unassigned}</strong> shard{unassigned === 1 ? "" : "s"} unassigned — the
+            shard manager is rebalancing or a runner is down.
+          </span>
+          <a href="#/shards" className="shrink-0 underline underline-offset-2 hover:opacity-80">
+            view shards →
+          </a>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <StatCard label="Pending" value={m.pending} sub="waiting to be delivered" />
         <StatCard label="In-flight" value={m.inflight} sub="read in the last 5 min" />
         <StatCard label="Scheduled" value={m.scheduled} sub="deliver_at in the future" />
+        <StatCard
+          label="Failed"
+          value={m.failed}
+          sub="exited with Failure"
+        />
         <StatCard label="Done" value={m.done} sub="processed messages" />
       </div>
+
+      <Card className="mt-3">
+        <CardHeader className="flex-row items-center justify-between">
+          <CardTitle>Activity — last hour</CardTitle>
+          <span className="text-[11px] text-muted">{history.length} samples</span>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-4">
+            <MetricSeries label="Pending depth" tone="accent" history={history} pick={(p) => p.pending} />
+            <MetricSeries label="In-flight" tone="info" history={history} pick={(p) => p.inflight} />
+            <MetricSeries label="Failed" tone="err" history={history} pick={(p) => p.failed} />
+            <MetricSeries
+              label="Unassigned shards"
+              tone="warn"
+              history={history}
+              pick={(p) => p.unassignedShards}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
       <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
         <Card>
           <CardHeader>
@@ -56,6 +111,7 @@ export function OverviewPage() {
           </CardContent>
         </Card>
       </div>
+
       <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
         <Card>
           <CardHeader>
@@ -67,7 +123,10 @@ export function OverviewPage() {
             )}
             {data!.topWorkflows.map((w) => (
               <div key={w.name} className="flex items-center justify-between text-[13px]">
-                <a href={`#/workflows/${encodeURIComponent(w.name)}`} className="truncate font-medium text-text hover:text-accent">
+                <a
+                  href={`#/workflows/${encodeURIComponent(w.name)}`}
+                  className="truncate font-medium text-text hover:text-accent"
+                >
                   {w.name}
                 </a>
                 <span className="tabular-nums text-muted">{w.runs} runs</span>
@@ -93,10 +152,40 @@ export function OverviewPage() {
   )
 }
 
+function MetricSeries({
+  label,
+  tone,
+  history,
+  pick
+}: {
+  label: string
+  tone: "accent" | "info" | "err" | "warn"
+  history: MetricPoint[]
+  pick: (p: MetricPoint) => number
+}) {
+  return (
+    <div className="min-w-0">
+      <div className="mb-1 flex items-baseline justify-between gap-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+          {label}
+        </span>
+      </div>
+      <Sparkline
+        points={history.map((p) => ({ t: p.t, v: pick(p) }))}
+        tone={tone}
+        height={96}
+      />
+    </div>
+  )
+}
+
 function ShardBar({ assigned, total }: { assigned: number; total: number }) {
   return (
     <div className="flex h-3 w-full overflow-hidden rounded-full border border-border bg-bg">
-      <div className="h-full bg-accent transition-all" style={{ width: `${(assigned / total) * 100}%` }} />
+      <div
+        className="h-full bg-accent transition-all"
+        style={{ width: `${(assigned / total) * 100}%` }}
+      />
     </div>
   )
 }

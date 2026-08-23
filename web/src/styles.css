@@ -13,6 +13,23 @@
   --color-warn: #fbbf24;
   --color-err: #f87171;
   --color-info: #a78bfa;
+  --scrollbar-thumb: #2a3245;
+}
+
+/* light palette — same variable names, flipped values */
+[data-theme="light"] {
+  --color-bg: #f4f5f9;
+  --color-surface: #ffffff;
+  --color-surface-2: #eef0f6;
+  --color-border: #d9dde8;
+  --color-text: #1b2233;
+  --color-muted: #626a80;
+  --color-accent: #2f6fe0;
+  --color-ok: #0f9d6c;
+  --color-warn: #c07f00;
+  --color-err: #dc4b4b;
+  --color-info: #7c5cd6;
+  --scrollbar-thumb: #c3c9d8;
 }
 
 html,
@@ -26,8 +43,8 @@ body {
   font-size: 14px;
 }
 
-/* thin dark scrollbars */
+/* thin scrollbars, theme-aware */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #2a3245 transparent;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
 }

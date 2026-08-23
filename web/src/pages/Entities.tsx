@@ -20,6 +20,7 @@ export function EntitiesPage() {
           value={q}
           onChange={(e) => setQ(e.target.value)}
           className="w-56"
+          data-search-input
         />
       </PageHeader>
       <ErrorNote error={error} />
@@ -40,6 +41,7 @@ export function EntitiesPage() {
           <TBody>
             {filtered.map((r) => {
               const isWorkflow = r.entityType.startsWith("Workflow/")
+              const isCron = r.entityType.startsWith("ClusterCron/")
               const name = isWorkflow ? r.entityType.slice("Workflow/".length) : r.entityType
               return (
                 <TR key={r.entityType}>
@@ -51,8 +53,21 @@ export function EntitiesPage() {
                       >
                         {name} <Badge tone="info" className="ml-1.5">workflow</Badge>
                       </a>
+                    ) : isCron ? (
+                      <a
+                        href={`#/crons`}
+                        className="font-medium text-text hover:text-accent"
+                      >
+                        {r.entityType} <Badge tone="accent" className="ml-1.5">cron</Badge>
+                      </a>
                     ) : (
-                      <code className="font-medium">{r.entityType}</code>
+                      <a
+                        href={`#/entities/${encodeURIComponent(r.entityType)}`}
+                        className="font-medium text-text hover:text-accent"
+                        title="view entity instances"
+                      >
+                        <code>{r.entityType}</code>
+                      </a>
                     )}
                   </TD>
                   <TD className="text-right tabular-nums">{r.entities}</TD>
