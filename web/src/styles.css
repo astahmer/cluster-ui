@@ -1,0 +1,33 @@
+@import "tailwindcss";
+@import "kumo-ui/styles.css";
+
+@theme {
+  --color-bg: #0b0e14;
+  --color-surface: #11151f;
+  --color-surface-2: #161b28;
+  --color-border: #232a3b;
+  --color-text: #e6e9f0;
+  --color-muted: #8b93a7;
+  --color-accent: #4c8dff;
+  --color-ok: #34d399;
+  --color-warn: #fbbf24;
+  --color-err: #f87171;
+  --color-info: #a78bfa;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-bg text-text antialiased;
+  font-size: 14px;
+}
+
+/* thin dark scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2a3245 transparent;
+}
