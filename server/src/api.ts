@@ -2,7 +2,7 @@ import { HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "@
 import { Effect, Schedule, Stream } from "effect"
 import { existsSync, readFileSync } from "node:fs"
 import { join, normalize, resolve } from "node:path"
-import { ActionError, assertWritable, interruptMessage, resetActivity, retryMessage } from "./actions.ts"
+import { ActionError, assertWritable, deleteMessage, interruptMessage, resetActivity, retryMessage } from "./actions.ts"
 import { AUTH_COOKIE, verifyToken } from "./auth.ts"
 import * as metrics from "./metrics.ts"
 import { config } from "./config.ts"
@@ -132,6 +132,56 @@ function actionHandler(
     }
   })
 }
+
+const BULK_ACTIONS = {
+  retry: (repo: Repo, id: string) => retryMessage(repo.db, repo.prefix, id),
+  interrupt: (repo: Repo, id: string) => interruptMessage(repo.db, repo.prefix, id),
+  delete: (repo: Repo, id: string) => deleteMessage(repo.db, repo.prefix, id)
+} as const
+
+/** Per-id results; individual failures never fail the whole batch. */
+const bulkActionHandler = Effect.map(reqWithBody, (p): HttpServerResponse.HttpServerResponse => {
+  try {
+    assertWritable(config.readonly)
+    const repo = repoFor(p.cluster ?? p.body?.cluster)
+    if (!repo) return notFound("cluster")
+    const action = p.body?.action
+    const run = typeof action === "string" ? BULK_ACTIONS[action as keyof typeof BULK_ACTIONS] : undefined
+    if (!run) {
+      return HttpServerResponse.unsafeJson(
+        { error: "action must be one of retry | interrupt | delete" },
+        { status: 400 }
+      )
+    }
+    const ids = p.body?.ids
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return HttpServerResponse.unsafeJson({ error: "non-empty ids array is required" }, { status: 400 })
+    }
+    const results = ids.slice(0, 500).map((raw: unknown) => {
+      const id = typeof raw === "string" ? raw : String(raw ?? "")
+      try {
+        run(repo, id)
+        return { id, ok: true }
+      } catch (e) {
+        return {
+          id,
+          ok: false,
+          error: e instanceof Error ? e.message : String(e),
+          status: e instanceof ActionError ? e.status : 500
+        }
+      }
+    })
+    return json({ results })
+  } catch (e) {
+    if (e instanceof ActionError) {
+      return HttpServerResponse.unsafeJson({ error: e.message }, { status: e.status })
+    }
+    return HttpServerResponse.unsafeJson(
+      { error: e instanceof Error ? e.message : String(e) },
+      { status: 500 }
+    )
+  }
+})
 
 const baseRouter = HttpRouter.empty.pipe(
   HttpRouter.get("/healthz", HttpServerResponse.text("ok")),
@@ -291,16 +341,56 @@ const baseRouter = HttpRouter.empty.pipe(
     "/api/actions/reset-activity",
     actionHandler((repo, id) => resetActivity(repo.db, repo.prefix, id))
   ),
+  HttpRouter.post(
+    "/api/actions/delete",
+    actionHandler((repo, id) => deleteMessage(repo.db, repo.prefix, id))
+  ),
+  HttpRouter.post("/api/actions/bulk", bulkActionHandler)
 
 )
 
 export const api = baseRouter.pipe(
+  // Prometheus scrape endpoint — outside /api/* so the auth middleware's
+  // static exemption covers it (same treatment as /healthz)
+  HttpRouter.get(
+    "/metrics",
+    Effect.succeed(
+      HttpServerResponse.text(metrics.prometheus(), {
+        contentType: "text/plain; version=0.0.4; charset=utf-8"
+      })
+    )
+  ),
+
+  HttpRouter.get(
+    "/api/traces",
+    Effect.map(req, (p) => {
+      const repo = repoFor(p.cluster)
+      return repo ? json(repo.traces(p.limit ? intParam(p.limit) ?? 50 : 50)) : notFound("cluster")
+    })
+  ),
+
+  HttpRouter.get(
+    "/api/traces/:traceId",
+    Effect.map(req, (p) => {
+      const repo = repoFor(p.cluster)
+      if (!repo || !p.traceId) return notFound(p.traceId ? "cluster" : "traceId")
+      const rows = repo.trace(decodeURIComponent(p.traceId))
+      return rows.length === 0 ? notFound("trace") : json({ traceId: decodeURIComponent(p.traceId), rows })
+    })
+  ),
+
   // ------------------------------------------------------- metrics & realtime
   HttpRouter.get(
     "/api/metrics/history",
     Effect.map(req, (p) => {
       const h = metrics.history(p.cluster)
-      return h === null ? notFound("cluster") : json(h)
+      if (h === null) return notFound("cluster")
+      const rangeMs = Number(p.rangeMs)
+      if (p.rangeMs !== undefined && Number.isFinite(rangeMs) && rangeMs > 0) {
+        const cutoff = Date.now() - rangeMs
+        return json(h.filter((s) => s.t >= cutoff))
+      }
+      return json(h)
     })
   ),
 

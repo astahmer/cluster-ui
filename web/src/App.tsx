@@ -9,13 +9,14 @@ import { WorkflowListPage, WorkflowRunsPage } from "./pages/Workflows.tsx"
 import { CronsPage } from "./pages/Crons.tsx"
 import { EntityInstancesPage } from "./pages/EntityInstances.tsx"
 import { SingletonsPage } from "./pages/Singletons.tsx"
+import { TracesPage, TraceDetailPage } from "./pages/Traces.tsx"
 
 /**
  * MessagesPage will accept these once W2 lands (CONTRACT.md); the cast keeps
  * this file compiling against either signature.
  */
 const SeededMessagesPage = MessagesPage as unknown as React.ComponentType<{
-  initialFilters?: { entityType?: string; entityId?: string; status?: string }
+  initialFilters?: { entityType?: string; entityId?: string; status?: string; q?: string }
 }>
 
 const TypedEntityInstances = EntityInstancesPage as React.ComponentType<{ entityType: string }>
@@ -44,6 +45,14 @@ export function App() {
       case "crons":
         content = <CronsPage />
         break
+      case "traces":
+        content =
+          parts.length >= 2 ? (
+            <TraceDetailPage key={parts[1]} traceId={decodeURIComponent(parts[1])} />
+          ) : (
+            <TracesPage />
+          )
+        break
       case "singletons":
         content = <SingletonsPage />
         break
@@ -61,7 +70,8 @@ export function App() {
             initialFilters={{
               entityType: route.params.get("entityType") ?? undefined,
               entityId: route.params.get("entityId") ?? undefined,
-              status: route.params.get("status") ?? undefined
+              status: route.params.get("status") ?? undefined,
+              q: route.params.get("q") ?? undefined
             }}
           />
         )

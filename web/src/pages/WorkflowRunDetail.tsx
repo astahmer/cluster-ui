@@ -6,9 +6,10 @@ import {
   type WorkflowRunDetail
 } from "../api.ts"
 import { JsonBlock, StatusBadge, statusTone } from "../components/pieces.tsx"
+import { SpanWaterfall, type TimelineSpan } from "../components/timeline.tsx"
 import { confirmDialog } from "../components/dialogs.tsx"
 import { toast } from "../toast.tsx"
-import { Badge, Button } from "../components/ui.tsx"
+import { Badge, Button, Card, CardContent, CardHeader, CardTitle } from "../components/ui.tsx"
 import { Banner, Text, cn } from "../kumo"
 import { fmtTime } from "../format.ts"
 import { triggerRefresh } from "../shell.tsx"
@@ -102,6 +103,42 @@ export function WorkflowRunPage({
 
   const canRetry = run.status === "done"
   const canCancel = run.status === "pending" || run.status === "inflight" || run.status === "scheduled"
+  const [timelineOpen, setTimelineOpen] = React.useState(true)
+
+  // waterfall spans: run message + its activities on one shared axis; an
+  // activity's bar runs until the next event (gaps between events are the signal)
+  const timelineSpans = React.useMemo(() => {
+    if (!run) return []
+    const activities = [...(data.activities as ActivityRow[])].sort((a, b) => a.createdAt - b.createdAt)
+    const spans: TimelineSpan[] = [
+      {
+        key: `run-${run.id}`,
+        label: `workflow ${executionId}`,
+        group: "workflow",
+        startMs: run.createdAt,
+        endMs: activities.length > 0 ? activities[activities.length - 1].createdAt : run.createdAt,
+        tone:
+          run.status === "done" ? (result?.outcome === "Failure" ? "danger" : "success") : "warning",
+        badge: result?.outcome === "Failure" ? <Badge tone="err">failed</Badge> : undefined
+      }
+    ]
+    activities.forEach((a, i) => {
+      const next = activities[i + 1]
+      spans.push({
+        key: a.id,
+        label: a.activityName ?? a.tag ?? a.kind,
+        group: a.activityName ? "activities" : (a.tag ?? a.kind),
+        startMs: a.createdAt,
+        endMs: next ? next.createdAt : a.createdAt,
+        tone: a.failed ? "danger" : a.status === "done" ? "success" : "warning",
+        badge:
+          typeof a.attempt === "number" && a.attempt > 1 ? (
+            <Badge tone="warn">attempt {a.attempt}</Badge>
+          ) : undefined
+      })
+    })
+    return spans
+  }, [run, data.activities, executionId, result])
 
   return (
     <div className="space-y-4 text-[13px]">
@@ -110,6 +147,31 @@ export function WorkflowRunPage({
       )}
 
       {actionError && <Banner variant="error">{actionError}</Banner>}
+
+      {timelineSpans.length >= 2 && (
+        <Card>
+          <CardHeader className="pb-1">
+            <CardTitle>
+              <button
+                type="button"
+                onClick={() => setTimelineOpen((o) => !o)}
+                className="flex w-full cursor-pointer items-center justify-between text-left"
+                aria-expanded={timelineOpen}
+              >
+                <span>Timeline</span>
+                <span className="text-[11px] font-normal text-kumo-subtle">
+                  {timelineOpen ? "hide" : "show"} · {data.activities.length} activities
+                </span>
+              </button>
+            </CardTitle>
+          </CardHeader>
+          {timelineOpen && (
+            <CardContent>
+              <SpanWaterfall spans={timelineSpans} />
+            </CardContent>
+          )}
+        </Card>
+      )}
 
       <section className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg border border-kumo-line bg-kumo-recessed p-3">
         <Field label="Execution">

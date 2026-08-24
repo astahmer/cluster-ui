@@ -1,9 +1,10 @@
 import * as React from "react"
-import { SquaresFour, Cpu, GridFour, Cube, ClockCounterClockwise, FlowArrow, ListDashes, CirclesThree, List } from "@phosphor-icons/react"
+import { SquaresFour, Cpu, GridFour, Cube, ClockCounterClockwise, FlowArrow, ListDashes, CirclesThree, List, Stack } from "@phosphor-icons/react"
 import { api } from "./api.ts"
 import * as live from "./live.ts"
 import { useFreshness } from "./freshness.ts"
 import { inputVariants } from "./kumo"
+import { CommandPalette, type PaletteItem } from "./components/command-palette.tsx"
 import { Badge } from "./components/ui.tsx"
 import { cn } from "./components/ui.tsx"
 
@@ -99,12 +100,13 @@ const NAV = [
   { to: "/entities", label: "Entities", icon: Cube },
   { to: "/workflows", label: "Workflows", icon: FlowArrow },
   { to: "/crons", label: "Crons", icon: ClockCounterClockwise },
+  { to: "/traces", label: "Traces", icon: Stack },
   { to: "/singletons", label: "Singletons", icon: CirclesThree },
   { to: "/messages", label: "Messages", icon: ListDashes }
 ]
 
 const NAV_GROUP_CLUSTER = new Set(["/overview", "/runners", "/shards"])
-const NAV_GROUP_WORK = new Set(["/entities", "/workflows", "/crons", "/singletons", "/messages"])
+const NAV_GROUP_WORK = new Set(["/entities", "/workflows", "/crons", "/traces", "/singletons", "/messages"])
 
 function FreshnessIndicator() {
   const { secondsAgo } = useFreshness()
@@ -214,6 +216,46 @@ function TopBar({ base, onMenu }: { base: string; onMenu: () => void }) {
 export function Shell({ route, children }: { route: string; children: React.ReactNode }) {
   const base = "/" + (route.split("?")[0].split("/")[1] ?? "overview")
   const [navOpen, setNavOpen] = React.useState(false)
+  const [paletteOpen, setPaletteOpen] = React.useState(false)
+
+  // ⌘K / Ctrl+K opens the command palette
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault()
+        setPaletteOpen((v) => !v)
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [])
+
+  const paletteItems = React.useMemo<PaletteItem[]>(
+    () =>
+      NAV.map((n) => ({
+        key: n.to,
+        label: `Go to ${n.label}`,
+        keywords: n.to,
+        hint: String(NAV.findIndex((x) => x.to === n.to) + 1),
+        run: () => navigate(n.to)
+      })),
+    []
+  )
+  const dynamicItems = React.useCallback(
+    (query: string): PaletteItem[] => {
+      // all-digit snowflake id → deep link into messages search
+      if (!/^\d{10,}$/.test(query)) return []
+      return [
+        {
+          key: "open-message",
+          label: `Open message ${query}`,
+          keywords: "message id search",
+          run: () => navigate(`/messages?q=${encodeURIComponent(query)}`)
+        }
+      ]
+    },
+    []
+  )
 
   // close the mobile drawer whenever the route changes
   React.useEffect(() => {
@@ -255,9 +297,17 @@ export function Shell({ route, children }: { route: string; children: React.Reac
   }, [])
 
   return (
+    <>
     <ShellLayout base={base} navOpen={navOpen} onMenu={() => setNavOpen(true)} onNavClose={() => setNavOpen(false)}>
       {children}
     </ShellLayout>
+    <CommandPalette
+      open={paletteOpen}
+      onClose={() => setPaletteOpen(false)}
+      staticItems={paletteItems}
+      dynamicItems={dynamicItems}
+    />
+    </>
   )
 }
 

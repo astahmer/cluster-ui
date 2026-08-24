@@ -574,6 +574,54 @@ export function makeRepo(db: Database.Database, prefix: string = config.prefix) 
     return { run, activities }
   }
 
+  /** Recent traces: non-null trace_ids grouped, newest message first. */
+  const traces = (limit = 50) => {
+    const rows = db
+      .prepare(
+        `SELECT m.trace_id as traceId, COUNT(*) as count,
+           MIN(m.id) as firstId, MAX(m.id) as lastId,
+           GROUP_CONCAT(DISTINCT m.kind) as kinds
+         FROM ${t.messages} m
+         WHERE m.trace_id IS NOT NULL AND m.trace_id != ''
+         GROUP BY m.trace_id
+         ORDER BY MAX(m.id) DESC
+         LIMIT ?`
+      )
+      .all(Math.min(Math.max(limit, 1), 200)) as ReadonlyArray<{
+      traceId: string
+      count: number | bigint
+      firstId: number | bigint
+      lastId: number | bigint
+      kinds: string | null
+    }>
+    return rows.map((r) => ({
+      traceId: r.traceId,
+      count: Number(r.count),
+      kinds:
+        r.kinds === null ? [] :
+        String(r.kinds)
+          .split(",")
+          .filter((k) => k !== "")
+          .map((k) => kindName(Number(k))),
+      firstAt: decodeSnowflake(String(r.firstId)).createdAt,
+      lastAt: decodeSnowflake(String(r.lastId)).createdAt
+    }))
+  }
+
+  /** All messages sharing a trace id, oldest first (same view shape as listMessages). */
+  const trace = (traceId: string) => {
+    const rows = db
+      .prepare(
+        `SELECT CAST(m.id AS TEXT) as id, m.message_id, m.shard_id, m.entity_type, m.entity_id,
+           m.kind, m.tag, m.payload, m.headers, m.trace_id, m.processed, m.last_read, m.deliver_at,
+           (${failedExistsFor("id")}) as failed_flag,
+           (SELECT COUNT(*) FROM ${t.replies} r WHERE CAST(r.request_id AS TEXT) = m.id) as reply_count
+         FROM ${t.messages} m WHERE m.trace_id = ? ORDER BY m.id ASC`
+      )
+      .all(traceId) as unknown as RawMessageRow[]
+    return rows.map(toMessageView)
+  }
+
   return {
     db,
     prefix,
@@ -587,7 +635,9 @@ export function makeRepo(db: Database.Database, prefix: string = config.prefix) 
     crons,
     workflows,
     workflowRuns,
-    workflowRun
+    workflowRun,
+    traces,
+    trace
   }
 }
 

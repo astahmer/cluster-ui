@@ -76,6 +76,15 @@ async function runChecks() {
   await new Promise((r) => setTimeout(r, 300)) // let the sampler take its first sample
   await check("metrics history", "/api/metrics/history", (b) =>
     Array.isArray(b) && b.length > 0 && "failed" in b[0] && "unassignedShards" in b[0])
+  await check("metrics history rangeMs", "/api/metrics/history?rangeMs=60000", (b) =>
+    Array.isArray(b) && b.every((s: any) => Date.now() - s.t <= 120_000))
+
+  // ---- traces ----------------------------------------------------------
+  const traces = await check("traces list", "/api/traces", (b) =>
+    Array.isArray(b) && b.length > 0 && typeof b[0].traceId === "string" && b[0].count >= 1)
+  const traceRows = await check("trace detail", `/api/traces/${encodeURIComponent(traces[0].traceId)}`,
+    (b) => Array.isArray(b.rows) && b.rows.length === traces[0].count && b.rows.every((r: any) => r.traceId === traces[0].traceId))
+  void traceRows
   const wfs = await check("workflows", "/api/workflows", (b) =>
     Array.isArray(b) && b.every((w: any) => "failedRuns" in w))
   const msgs = await check("messages list", "/api/messages?pageSize=5", (b) => b.rows?.length === 5 && b.total > 0)
@@ -141,6 +150,49 @@ async function runChecks() {
   const missingOk = missingAction.status === 404
   console.log(`${missingOk ? "✓" : "✗"} action on unknown id -> 404`)
   if (!missingOk) failures++
+
+  // ---- bulk + delete + /metrics ----------------------------------------
+  const pending = await (async () => {
+    const res = await fetch(`http://127.0.0.1:${PORT}/api/messages?status=scheduled&pageSize=3`)
+    return ((await res.json()) as any).rows as Array<{ id: string }>
+  })()
+  const bulkIds = pending.slice(0, 2).map((r) => r.id)
+  if (bulkIds.length === 2) {
+    const bulkRes = await fetch(`http://127.0.0.1:${PORT}/api/actions/bulk`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ids: [...bulkIds, "42"], action: "interrupt" })
+    })
+    const bulkBody = (await bulkRes.json()) as any
+    const bulkOk = bulkRes.status === 200 &&
+      bulkBody.results.length === 3 &&
+      bulkBody.results.filter((r: any) => r.ok).length === 2 &&
+      bulkBody.results.some((r: any) => !r.ok && r.status === 404)
+    console.log(`${bulkOk ? "✓" : "✗"} bulk interrupt (2 ok, 1 per-id 404)`)
+    if (!bulkOk) failures++
+  }
+
+  const delTarget = await (async () => {
+    const res = await fetch(`http://127.0.0.1:${PORT}/api/messages?status=pending&pageSize=1`)
+    return ((await res.json()) as any).rows[0] as { id: string }
+  })()
+  if (delTarget) {
+    await fetch(`http://127.0.0.1:${PORT}/api/actions/delete`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ messageId: delTarget.id })
+    })
+    const after = await fetch(`http://127.0.0.1:${PORT}/api/messages/${delTarget.id}`)
+    const delOk = after.status === 404
+    console.log(`${delOk ? "✓" : "✗"} delete message (gone afterwards)`)
+    if (!delOk) failures++
+  }
+
+  const prom = await fetch(`http://127.0.0.1:${PORT}/metrics`)
+  const promText = await prom.text()
+  const promOk = prom.ok && promText.includes("cluster_ui_messages") && promText.includes("cluster_ui_runners")
+  console.log(`${promOk ? "✓" : "✗"} prometheus /metrics exposition`)
+  if (!promOk) failures++
 
   // unknown cluster
   const badCluster = await fetch(`http://127.0.0.1:${PORT}/api/overview?cluster=nope`)

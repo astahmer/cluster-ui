@@ -263,10 +263,27 @@ export interface AuthResponse {
   ok: boolean
 }
 
+export type BulkActionKind = "retry" | "interrupt" | "delete"
+
+/** One entry per submitted id; failed ids carry an error message. */
+export interface BulkActionResult {
+  id: string
+  ok: boolean
+  error?: string
+}
+
 export interface ReporterSingletonInfo {
   name: string
   address?: string | null
   startedAt?: number | string | null
+}
+
+export interface TraceSummary {
+  traceId: string
+  count: number
+  kinds: string[]
+  firstAt: number
+  lastAt: number
 }
 
 export interface RunnerReport {
@@ -298,8 +315,13 @@ export const api = {
       )}`
     ),
   crons: () => get<CronJob[]>("/api/crons"),
+  traces: () => get<TraceSummary[]>("/api/traces"),
+  trace: (traceId: string) => get<Message[]>(`/api/traces/${encodeURIComponent(traceId)}`),
   singletons: () => get<{ runners: RunnerReport[] }>("/api/singletons"),
-  metricsHistory: () => get<MetricPoint[]>("/api/metrics/history"),
+  metricsHistory: (opts?: { rangeMs?: number }) =>
+    get<MetricPoint[]>(
+      "/api/metrics/history" + (opts?.rangeMs ? `?rangeMs=${opts.rangeMs}` : "")
+    ),
   config: () => get<AppConfig>("/api/config"),
   clusters: () => get<{ name: string }[]>("/api/clusters"),
 
@@ -324,6 +346,11 @@ export const api = {
   interruptMessage: (messageId: string) => post<{ ok: true }>("/api/actions/interrupt", { messageId }),
   resetActivity: (messageId: string) =>
     post<{ ok: true }>("/api/actions/reset-activity", { messageId }),
+  deleteMessage: (messageId: string) => post<{ ok: true }>("/api/actions/delete", { messageId }),
+
+  /** Apply an action to many messages at once; per-id results, batch never hard-fails. */
+  bulkActions: (action: BulkActionKind, ids: ReadonlyArray<string>) =>
+    post<BulkActionResult[]>("/api/actions/bulk", { ids: [...ids], action }),
 
   login: (token: string) => post<AuthResponse>("/api/auth", { token })
 }

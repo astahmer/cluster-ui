@@ -14,10 +14,12 @@ export interface MetricSample {
   readonly done: number
   readonly failed: number
   readonly unassignedShards: number
+  readonly runners: number
 }
 
 const SAMPLE_INTERVAL_MS = 10_000
-const RETENTION_MS = 60 * 60 * 1000
+// 24h at ~10s interval ≈ 8640 samples × ~7 numbers — small enough to keep in memory
+const RETENTION_MS = 24 * 60 * 60 * 1000
 
 /** per-cluster series */
 const byName = new Map<string, Array<MetricSample>>()
@@ -26,7 +28,7 @@ const aggregate: Array<MetricSample> = []
 
 function takeSample(repos: ReadonlyArray<[string, Repo]>) {
   const t = Date.now()
-  const totals = { pending: 0, inflight: 0, scheduled: 0, done: 0, failed: 0, unassignedShards: 0 }
+  const totals = { pending: 0, inflight: 0, scheduled: 0, done: 0, failed: 0, unassignedShards: 0, runners: 0 }
   for (const [name, repo] of repos) {
     try {
       const ov = repo.overview()
@@ -37,7 +39,8 @@ function takeSample(repos: ReadonlyArray<[string, Repo]>) {
         scheduled: ov.messages.scheduled,
         done: ov.messages.done,
         failed: ov.messages.failed,
-        unassignedShards: ov.unassignedShards
+        unassignedShards: ov.unassignedShards,
+        runners: ov.runners.total
       }
       let series = byName.get(name)
       if (!series) {
@@ -51,6 +54,7 @@ function takeSample(repos: ReadonlyArray<[string, Repo]>) {
       totals.done += s.done
       totals.failed += s.failed
       totals.unassignedShards += s.unassignedShards
+      totals.runners += s.runners
     } catch {
       // a broken cluster db must not kill sampling of the others
     }
@@ -75,6 +79,48 @@ export function history(cluster?: string): Array<MetricSample> | null {
   if (cluster === undefined || cluster === "") return aggregate.slice()
   const series = byName.get(cluster)
   return series ? series.slice() : null
+}
+
+/** Latest sample per cluster, for the Prometheus exposition. */
+function latestPerCluster(): Array<[string, MetricSample]> {
+  return [...byName.entries()]
+    .map(([name, series]) => [name, series[series.length - 1]] as [string, MetricSample])
+    .filter((entry) => entry[1] !== undefined)
+}
+
+const PROM_STATES = ["pending", "inflight", "scheduled", "done", "failed"] as const
+
+/**
+ * Prometheus text exposition (format version 0.0.4) of the latest sampled
+ * counters per cluster.
+ */
+export function prometheus(): string {
+  const multi = byName.size > 1
+  const lines: string[] = []
+  lines.push("# HELP cluster_ui_messages Messages in storage by state.")
+  lines.push("# TYPE cluster_ui_messages gauge")
+  for (const [name, s] of latestPerCluster()) {
+    for (const state of PROM_STATES) {
+      lines.push(`cluster_ui_messages${multi ? `{cluster="${name}",state="${state}"}` : `{state="${state}"}`} ${s[state]}`)
+    }
+  }
+  if (!multi && aggregate.length > 0) {
+    const a = aggregate[aggregate.length - 1]
+    for (const state of PROM_STATES) {
+      lines.push(`cluster_ui_messages{state="${state}"} ${a[state]}`)
+    }
+  }
+  lines.push("# HELP cluster_ui_unassigned_shards Shards not owned by any runner.")
+  lines.push("# TYPE cluster_ui_unassigned_shards gauge")
+  for (const [name, s] of latestPerCluster()) {
+    lines.push(`cluster_ui_unassigned_shards${multi ? `{cluster="${name}"}` : ""} ${s.unassignedShards}`)
+  }
+  lines.push("# HELP cluster_ui_runners Registered runners.")
+  lines.push("# TYPE cluster_ui_runners gauge")
+  for (const [name, s] of latestPerCluster()) {
+    lines.push(`cluster_ui_runners${multi ? `{cluster="${name}"}` : ""} ${s.runners}`)
+  }
+  return lines.join("\n") + "\n"
 }
 
 /** Background sampler fiber as a Layer; samples immediately, then every ~10s. */

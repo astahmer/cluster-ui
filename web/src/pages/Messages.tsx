@@ -1,15 +1,18 @@
 import * as React from "react"
 import {
   api,
+  type BulkActionKind,
   type Message,
   type MessageDetail,
   type MessageStatus,
   type RunResult
 } from "../api.ts"
+import { downloadCsv, downloadJson } from "../export.ts"
 import { DetailPanel, SkeletonTable, StatusBadge, statusTone, useMessageDetail } from "../components/pieces.tsx"
 import { confirmDialog } from "../components/dialogs.tsx"
 import { toast } from "../toast.tsx"
 import { Badge, Button, Input, Select, Table, TBody, TD, TH, THead, TR, cn } from "../components/ui.tsx"
+import { Table as KumoTable } from "../kumo"
 import { fmtCountdown, fmtTime, relTime } from "../format.ts"
 import { ErrorNote, PageHeader, useEscToClose } from "../shell.tsx"
 import { triggerRefresh, useLive, usePauseWhile } from "../live.ts"
@@ -60,20 +63,11 @@ function copyJson(value: unknown) {
   navigator.clipboard?.writeText(JSON.stringify(value, null, 2)).catch(() => {})
 }
 
-function downloadJson(name: string, value: unknown) {
-  const blob = new Blob([JSON.stringify(value, null, 2)], { type: "application/json" })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement("a")
-  a.href = url
-  a.download = name
-  a.click()
-  URL.revokeObjectURL(url)
-}
-
 export interface MessagesInitialFilters {
   entityType?: string
   entityId?: string
   status?: string
+  q?: string
 }
 
 /* -------------------------------------------------------------------- page -- */
@@ -85,7 +79,7 @@ export function MessagesPage({ initialFilters }: { initialFilters?: MessagesInit
   const [status, setStatus] = React.useState<string>(initialFilters?.status ?? "")
   const [entityType, setEntityType] = React.useState(initialFilters?.entityType ?? "")
   const [entityId, setEntityId] = React.useState(initialFilters?.entityId ?? "")
-  const [q, setQ] = React.useState("")
+  const [q, setQ] = React.useState(initialFilters?.q ?? "")
   const [debouncedQ, setDebouncedQ] = React.useState("")
   const [createdAfter, setCreatedAfter] = React.useState("")
   const [createdBefore, setCreatedBefore] = React.useState("")
@@ -94,6 +88,7 @@ export function MessagesPage({ initialFilters }: { initialFilters?: MessagesInit
   const [page, setPage] = React.useState(1)
   const [openId, setOpenId] = React.useState<string | null>(null)
   const [actionError, setActionError] = React.useState<string | null>(null)
+  const [selected, setSelected] = React.useState<Set<string>>(new Set())
 
   const config = useAppConfig()
   const detail = useMessageDetail(openId)
@@ -107,8 +102,9 @@ export function MessagesPage({ initialFilters }: { initialFilters?: MessagesInit
     setEntityId(initialFilters?.entityId ?? "")
     setStatus(initialFilters?.status ?? "")
     setTab(initialFilters?.status ?? "")
+    setQ(initialFilters?.q ?? "")
     setPage(1)
-  }, [initialFilters?.entityType, initialFilters?.entityId, initialFilters?.status])
+  }, [initialFilters?.entityType, initialFilters?.entityId, initialFilters?.status, initialFilters?.q])
 
   React.useEffect(() => {
     const id = setTimeout(() => {
@@ -125,6 +121,11 @@ export function MessagesPage({ initialFilters }: { initialFilters?: MessagesInit
     setSort(key === "scheduled" ? "deliverAt" : "id")
     setPage(1)
   }
+
+  // any filter/tab/page change invalidates the current selection
+  React.useEffect(() => {
+    setSelected(new Set())
+  }, [status, tab, entityType, entityId, debouncedQ, createdAfter, createdBefore, sort, page, pageSize])
 
   const { loading, error, refresh } = useLive(
     async () =>
@@ -167,6 +168,70 @@ export function MessagesPage({ initialFilters }: { initialFilters?: MessagesInit
       toast.error(`${what} failed: ${msg}`)
     }
   }
+
+  const rows = data?.rows ?? []
+  const visibleIds = rows.map((r) => r.id)
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.has(id))
+
+  const toggleRow = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const toggleAllVisible = () => {
+    setSelected(allVisibleSelected ? new Set() : new Set(visibleIds))
+  }
+
+  const runBulk = async (action: BulkActionKind) => {
+    const ids = [...selected]
+    if (ids.length === 0) return
+    const label = action === "delete" ? "Delete" : "Retry"
+    if (
+      !(await confirmDialog({
+        title: `${label} ${ids.length} message${ids.length === 1 ? "" : "s"}?`,
+        description:
+          action === "delete" ?
+            "Deletes the message rows and their replies from the cluster storage. This cannot be undone." :
+            "The actions write directly to the cluster's message storage.",
+        destructive: true,
+        confirmLabel: `${label} ${ids.length}`
+      }))
+    )
+      return
+    try {
+      const results = await api.bulkActions(action, ids)
+      const okCount = results.filter((r) => r.ok).length
+      setActionError(null)
+      if (okCount === results.length) toast.success(`${label}: ${okCount}/${results.length} done`)
+      else toast.error(`${label}: ${okCount}/${results.length} done — first failure: ${results.find((r) => !r.ok)?.error}`)
+      refresh()
+      triggerRefresh()
+      setSelected(new Set())
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      setActionError(msg)
+      toast.error(`${label.toLowerCase()} failed: ${msg}`)
+    }
+  }
+
+  const exportRows = () =>
+    rows.map((m) => ({
+      id: m.id,
+      status: m.status,
+      failed: m.failed,
+      entityType: m.entityType,
+      entityId: m.entityId,
+      tag: m.tag ?? "",
+      shardId: m.shardId,
+      replyCount: m.replyCount,
+      createdAt: m.createdAt,
+      ...(m.deliverAt !== null ? { deliverAt: m.deliverAt } : {}),
+      ...(m.traceId ? { traceId: m.traceId } : {})
+    }))
 
   return (
     <div>
@@ -255,7 +320,31 @@ export function MessagesPage({ initialFilters }: { initialFilters?: MessagesInit
             <option value="id">newest first</option>
           </Select>
         )}
+
+        <span className="ml-auto flex items-center gap-1">
+          <Button variant="ghost" size="sm" disabled={rows.length === 0} onClick={() => downloadJson(exportRows(), "messages.json")}>
+            export json
+          </Button>
+          <Button variant="ghost" size="sm" disabled={rows.length === 0} onClick={() => downloadCsv(exportRows(), "messages.csv")}>
+            export csv
+          </Button>
+        </span>
       </Toolbar>
+
+      {selected.size > 0 && (
+        <div className="mb-3 flex items-center gap-2 rounded-md border border-kumo-line bg-kumo-canvas/50 px-3 py-2 text-[13px]">
+          <span className="font-medium tabular-nums">{selected.size} selected</span>
+          <Button variant="secondary" size="sm" onClick={() => runBulk("retry")}>
+            ⟳ retry selected
+          </Button>
+          <Button variant="danger" size="sm" onClick={() => runBulk("delete")}>
+            ✕ delete selected
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
+            clear
+          </Button>
+        </div>
+      )}
 
       <ErrorNote error={error ?? actionError} onRetry={refresh} />
 
@@ -265,6 +354,12 @@ export function MessagesPage({ initialFilters }: { initialFilters?: MessagesInit
         <Table>
           <THead>
             <TR>
+              <KumoTable.CheckHead
+                aria-label="select all visible messages"
+                checked={allVisibleSelected}
+                indeterminate={!allVisibleSelected && selected.size > 0}
+                onCheckedChange={toggleAllVisible}
+              />
               <TH>Id</TH>
               <TH>Status</TH>
               <TH>Entity</TH>
@@ -281,12 +376,15 @@ export function MessagesPage({ initialFilters }: { initialFilters?: MessagesInit
                 key={m.id}
                 m={m}
                 scheduledView={tab === "scheduled"}
+                selected={selected.has(m.id)}
+                onToggle={() => toggleRow(m.id)}
                 onOpen={() => setOpenId(m.id)}
+                onDelete={() => runAction(() => api.deleteMessage(m.id), "delete")}
               />
             ))}
             {!loading && (!data || data.rows.length === 0) && (
               <TR>
-                <TD colSpan={8} className="py-6">
+                <TD colSpan={9} className="py-6">
                   <Empty
                     title="No messages match"
                     description="Adjust the search, status tabs or time range."
@@ -321,11 +419,17 @@ export function MessagesPage({ initialFilters }: { initialFilters?: MessagesInit
 function MessageRow({
   m,
   scheduledView,
-  onOpen
+  selected,
+  onToggle,
+  onOpen,
+  onDelete
 }: {
   m: Message
   scheduledView: boolean
+  selected: boolean
+  onToggle: () => void
   onOpen: () => void
+  onDelete: () => Promise<void>
 }) {
   const config = useAppConfig()
   const traceUrl =
@@ -334,7 +438,13 @@ function MessageRow({
       null
 
   return (
-    <TR className="cursor-pointer" onClick={onOpen}>
+    <TR className="cursor-pointer" onClick={onOpen} data-selected={selected || undefined}>
+      <KumoTable.CheckCell
+        aria-label={selected ? "deselect message" : "select message"}
+        checked={selected}
+        onCheckedChange={() => onToggle()}
+        onClick={(e: React.MouseEvent) => e.stopPropagation()}
+      />
       <TD className="font-mono text-xs text-kumo-subtle">{shortId(m.id)}</TD>
       <TD>
         <div className="flex items-center gap-1.5">
@@ -367,18 +477,32 @@ function MessageRow({
         )}
       </TD>
       <TD>
-        {traceUrl && (
-          <a
-            href={traceUrl}
-            target="_blank"
-            rel="noreferrer"
-            title={`trace ${m.traceId}`}
-            onClick={(e) => e.stopPropagation()}
-            className="text-kumo-link hover:underline"
+        <div className="flex items-center gap-2">
+          {traceUrl && (
+            <a
+              href={traceUrl}
+              target="_blank"
+              rel="noreferrer"
+              title={`trace ${m.traceId}`}
+              onClick={(e) => e.stopPropagation()}
+              className="text-kumo-link hover:underline"
+            >
+              ↗ trace
+            </a>
+          )}
+          <button
+            type="button"
+            title="delete message"
+            aria-label={`delete message ${m.id}`}
+            className="cursor-pointer rounded px-1 text-kumo-subtle hover:bg-kumo-danger-tint hover:text-kumo-danger"
+            onClick={(e) => {
+              e.stopPropagation()
+              onDelete()
+            }}
           >
-            ↗ trace
-          </a>
-        )}
+            ✕
+          </button>
+        </div>
       </TD>
     </TR>
   )
@@ -516,7 +640,7 @@ function MessageDetailBody({
             <Button variant="ghost" size="sm" onClick={() => copyJson(d)}>
               copy json
             </Button>
-            <Button variant="ghost" size="sm" onClick={() => downloadJson(`message-${m.id}.json`, d)}>
+            <Button variant="ghost" size="sm" onClick={() => downloadJson(d, `message-${m.id}.json`)}>
               download
             </Button>
           </span>

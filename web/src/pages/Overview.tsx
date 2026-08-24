@@ -5,25 +5,38 @@ import { Sparkline } from "../components/sparkline.tsx"
 import { ActivityDot, SkeletonCards, SkeletonTable, StatCard } from "../components/pieces.tsx"
 import { Badge } from "../components/ui.tsx"
 import { ErrorNote, PageHeader, useLive } from "../shell.tsx"
-import { Banner } from "../kumo"
+import { Banner, Tabs } from "../kumo"
+
+const RANGES = [
+  { label: "1h", ms: 3_600_000 },
+  { label: "6h", ms: 6 * 3_600_000 },
+  { label: "24h", ms: 24 * 3_600_000 }
+]
 
 export function OverviewPage() {
   const [data, setData] = React.useState<Overview | null>(null)
   const [history, setHistory] = React.useState<MetricPoint[]>([])
+  const [rangeMs, setRangeMs] = React.useState(RANGES[0].ms)
 
   const loadOverview = React.useRef(async () => setData(await api.overview()))
-  const loadHistory = React.useRef(async () => {
+  const loadHistoryRef = React.useRef<(ms: number) => Promise<void>>(async (ms: number) => {
     try {
-      const points = await api.metricsHistory()
+      const points = await api.metricsHistory({ rangeMs: ms })
       // tolerate older servers / mocks returning a non-array
       setHistory(Array.isArray(points) ? points : [])
     } catch {
       // sampler may not be running (older server) — sparklines just stay empty
     }
   })
+  const rangeRef = React.useRef(rangeMs)
+  rangeRef.current = rangeMs
+  const loadHistory = React.useRef(async () => loadHistoryRef.current(rangeRef.current))
 
   const overviewLive = useLive(() => loadOverview.current())
   useLive(() => loadHistory.current())
+  React.useEffect(() => {
+    void loadHistoryRef.current(rangeMs)
+  }, [rangeMs])
 
   if (overviewLive.loading && !data)
     return (
@@ -69,12 +82,21 @@ export function OverviewPage() {
       </div>
 
       <Card className="mt-3">
-        <CardHeader className="flex-row items-center justify-between">
-          <CardTitle>Activity — last hour</CardTitle>
-          <span className="text-[11px] text-kumo-subtle">{history.length} samples</span>
+        <CardHeader className="flex-row flex-wrap items-center justify-between gap-2">
+          <CardTitle>Activity — {RANGES.find((r) => r.ms === rangeMs)?.label ?? ""}</CardTitle>
+          <div className="flex items-center gap-3">
+            <span className="text-[11px] text-kumo-subtle">{history.length} samples</span>
+            <Tabs
+              variant="segmented"
+              size="sm"
+              tabs={RANGES.map((r) => ({ value: String(r.ms), label: r.label }))}
+              value={String(rangeMs)}
+              onValueChange={(v) => setRangeMs(Number(v))}
+            />
+          </div>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-5">
             <MetricSeries label="Pending depth" tone="accent" history={history} pick={(p) => p.pending} />
             <MetricSeries label="In-flight" tone="info" history={history} pick={(p) => p.inflight} />
             <MetricSeries label="Failed" tone="err" history={history} pick={(p) => p.failed} />
@@ -84,6 +106,7 @@ export function OverviewPage() {
               history={history}
               pick={(p) => p.unassignedShards}
             />
+            <FailureRate history={history} />
           </div>
         </CardContent>
       </Card>
@@ -184,6 +207,29 @@ function MetricSeries({
         points={history.map((p) => ({ t: p.t, v: pick(p) }))}
         tone={tone}
         height={96}
+      />
+    </div>
+  )
+}
+
+function FailureRate({ history }: { history: MetricPoint[] }) {
+  const points = history
+    .filter((p) => p.done + p.failed > 0)
+    .map((p) => ({ t: p.t, v: (p.failed / (p.done + p.failed)) * 100 }))
+  const latest = points.length > 0 ? points[points.length - 1].v : 0
+  return (
+    <div className="min-w-0">
+      <div className="mb-1 flex items-baseline justify-between gap-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-kumo-subtle">
+          Failure rate %
+        </span>
+        {latest > 5 && <Badge tone="err">degraded</Badge>}
+      </div>
+      <Sparkline
+        points={points}
+        tone={latest > 5 ? "err" : "ok"}
+        height={96}
+        formatValue={(v) => v.toFixed(1) + "%"}
       />
     </div>
   )

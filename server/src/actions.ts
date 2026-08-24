@@ -8,6 +8,8 @@ import { SNOWFLAKE_EPOCH } from "./config.ts"
  *   the entity re-executes (see SqlMessageStorage's own reset path).
  * - interrupt: append an Interrupt envelope row (kind = 2) which the cluster
  *   consumes natively.
+ * - delete: remove the message row and its replies entirely (dead-letter
+ *   discard).
  *
  * All functions throw ActionError with a user-facing message; the API layer
  * maps that to HTTP status codes.
@@ -112,6 +114,18 @@ export function interruptMessage(db: Database.Database, prefix: string, messageI
           trace_id, span_id, sampled, processed, request_id, reply_id, last_reply_id, last_read, deliver_at)
        VALUES (?, NULL, ?, ?, ?, 2, NULL, NULL, NULL, NULL, NULL, 1, 1, ?, NULL, NULL, NULL, NULL)`
     ).run(String(nextSnowflake()), target.shard_id, target.entity_type, target.entity_id, BigInt(target.idText))
+  })
+  tx()
+  return { ok: true }
+}
+
+/** Permanently remove a message and its replies (dead-letter discard). */
+export function deleteMessage(db: Database.Database, prefix: string, messageId: string): { ok: true } {
+  const t = { messages: `${prefix}_messages`, replies: `${prefix}_replies` }
+  const target = findMessage(db, t, messageId)
+  const tx = db.transaction(() => {
+    db.prepare(`DELETE FROM ${t.replies} WHERE CAST(request_id AS TEXT) = ?`).run(target.idText)
+    db.prepare(`DELETE FROM ${t.messages} WHERE CAST(id AS TEXT) = ?`).run(target.idText)
   })
   tx()
   return { ok: true }
