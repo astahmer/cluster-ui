@@ -2,13 +2,14 @@ import * as React from "react"
 import { api, type Shard } from "../api.ts"
 import { Badge, Select, Table, TBody, TD, TH, THead, TR } from "../components/ui.tsx"
 import { ErrorNote, PageHeader, usePolling } from "../shell.tsx"
+import { SkeletonTable } from "../components/pieces.tsx"
 
 export function ShardsPage() {
   const [shards, setShards] = React.useState<Shard[]>([])
   const [filter, setFilter] = React.useState<"all" | "assigned" | "unassigned">("all")
-  const { loading, error } = usePolling(async () => setShards(await api.shards()))
+  const { loading, error, refresh } = usePolling(async () => setShards(await api.shards()))
 
-  if (loading && shards.length === 0) return null
+  if (loading && shards.length === 0) return <SkeletonTable />
   const filtered = shards.filter((s) =>
     filter === "all" ? true : filter === "assigned" ? s.address !== null : s.address === null
   )
@@ -23,7 +24,7 @@ export function ShardsPage() {
           <option value="unassigned">Unassigned ({shards.length - assignedCount})</option>
         </Select>
       </PageHeader>
-      <ErrorNote error={error} />
+      <ErrorNote error={error} onRetry={refresh} />
       <div className="mb-4 rounded-lg border border-kumo-line bg-kumo-base p-4">
         <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-kumo-subtle">
           Distribution map — one cell per shard

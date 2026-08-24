@@ -6,11 +6,13 @@ import {
   type MessageStatus,
   type RunResult
 } from "../api.ts"
-import { DetailPanel, StatusBadge, statusTone, useMessageDetail } from "../components/pieces.tsx"
+import { DetailPanel, SkeletonTable, StatusBadge, statusTone, useMessageDetail } from "../components/pieces.tsx"
+import { confirmDialog } from "../components/dialogs.tsx"
+import { toast } from "../toast.tsx"
 import { Badge, Button, Input, Select, Table, TBody, TD, TH, THead, TR, cn } from "../components/ui.tsx"
 import { fmtCountdown, fmtTime, relTime } from "../format.ts"
 import { ErrorNote, PageHeader, useEscToClose } from "../shell.tsx"
-import { triggerRefresh, useLive } from "../live.ts"
+import { triggerRefresh, useLive, usePauseWhile } from "../live.ts"
 import { Banner, CodeBlock, Empty, InputGroup, Tabs, Toolbar } from "../kumo"
 
 /* ------------------------------------------------------------------ config -- */
@@ -96,6 +98,8 @@ export function MessagesPage({ initialFilters }: { initialFilters?: MessagesInit
   const config = useAppConfig()
   const detail = useMessageDetail(openId)
   useEscToClose(() => setOpenId(null))
+  // stop background polling while the detail panel is open so it doesn't rerender under the cursor
+  usePauseWhile(openId !== null)
 
   // keep URL-seeded filters in sync when the hash changes underneath us
   React.useEffect(() => {
@@ -142,14 +146,25 @@ export function MessagesPage({ initialFilters }: { initialFilters?: MessagesInit
   )
 
   const runAction = async (fn: () => Promise<unknown>, what: string) => {
-    if (!window.confirm(`Are you sure you want to ${what} this message?`)) return
+    if (
+      !(await confirmDialog({
+        title: `Are you sure you want to ${what} this message?`,
+        description: "The action writes directly to the cluster's message storage.",
+        destructive: true,
+        confirmLabel: what.charAt(0).toUpperCase() + what.slice(1)
+      }))
+    )
+      return
     try {
       await fn()
       setActionError(null)
+      toast.success(`Message ${what} done`)
       refresh()
       triggerRefresh()
     } catch (e) {
-      setActionError(e instanceof Error ? e.message : String(e))
+      const msg = e instanceof Error ? e.message : String(e)
+      setActionError(msg)
+      toast.error(`${what} failed: ${msg}`)
     }
   }
 
@@ -242,8 +257,10 @@ export function MessagesPage({ initialFilters }: { initialFilters?: MessagesInit
         )}
       </Toolbar>
 
-      <ErrorNote error={error ?? actionError} />
+      <ErrorNote error={error ?? actionError} onRetry={refresh} />
 
+      {loading && !data && <SkeletonTable rows={12} cols={6} />}
+      {!loading && (
       <div className="rounded-lg border border-kumo-line bg-kumo-base">
         <Table>
           <THead>
@@ -280,6 +297,7 @@ export function MessagesPage({ initialFilters }: { initialFilters?: MessagesInit
           </TBody>
         </Table>
       </div>
+      )}
 
       <Pager page={page} total={data?.total ?? 0} pageSize={pageSize} onChange={setPage} />
 

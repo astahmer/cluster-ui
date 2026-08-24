@@ -1,6 +1,6 @@
 import * as React from "react"
 import { api, type EntityInstance } from "../api.ts"
-import { ActivityDot } from "../components/pieces.tsx"
+import { ActivityDot, SkeletonTable } from "../components/pieces.tsx"
 import { Badge, Button, Input, Table, TBody, TD, TH, THead, TR } from "../components/ui.tsx"
 import { ErrorNote, PageHeader, usePolling } from "../shell.tsx"
 import { Empty } from "../kumo"
@@ -21,7 +21,7 @@ export function EntityInstancesPage({ entityType }: { entityType: string }) {
     return () => clearTimeout(id)
   }, [q])
 
-  const { loading, error } = usePolling(
+  const { loading, error, refresh } = usePolling(
     async () => {
       const res = await api.entityInstances({ entityType, q: debouncedQ || undefined, page, pageSize })
       setRows(res.rows)
@@ -29,6 +29,8 @@ export function EntityInstancesPage({ entityType }: { entityType: string }) {
     },
     [entityType, debouncedQ, page, pageSize]
   )
+
+  if (loading && rows.length === 0) return <SkeletonTable rows={10} cols={4} />
 
   return (
     <div>
@@ -47,7 +49,7 @@ export function EntityInstancesPage({ entityType }: { entityType: string }) {
           data-search-input
         />
       </PageHeader>
-      <ErrorNote error={error} />
+      <ErrorNote error={error} onRetry={refresh} />
 
       <div className="rounded-lg border border-kumo-line bg-kumo-base">
         <Table>

@@ -1,7 +1,8 @@
 import * as React from "react"
-import { SquaresFour, Cpu, GridFour, Cube, ClockCounterClockwise, FlowArrow, ListDashes } from "@phosphor-icons/react"
+import { SquaresFour, Cpu, GridFour, Cube, ClockCounterClockwise, FlowArrow, ListDashes, CirclesThree, List } from "@phosphor-icons/react"
 import { api } from "./api.ts"
 import * as live from "./live.ts"
+import { useFreshness } from "./freshness.ts"
 import { inputVariants } from "./kumo"
 import { Badge } from "./components/ui.tsx"
 import { cn } from "./components/ui.tsx"
@@ -98,13 +99,28 @@ const NAV = [
   { to: "/entities", label: "Entities", icon: Cube },
   { to: "/workflows", label: "Workflows", icon: FlowArrow },
   { to: "/crons", label: "Crons", icon: ClockCounterClockwise },
+  { to: "/singletons", label: "Singletons", icon: CirclesThree },
   { to: "/messages", label: "Messages", icon: ListDashes }
 ]
 
 const NAV_GROUP_CLUSTER = new Set(["/overview", "/runners", "/shards"])
-const NAV_GROUP_WORK = new Set(["/entities", "/workflows", "/crons", "/messages"])
+const NAV_GROUP_WORK = new Set(["/entities", "/workflows", "/crons", "/singletons", "/messages"])
 
-function TopBar({ base }: { base: string }) {
+function FreshnessIndicator() {
+  const { secondsAgo } = useFreshness()
+  if (secondsAgo === null) return null
+  const stale = secondsAgo > 15
+  return (
+    <span
+      className={cn("hidden text-[11px] tabular-nums sm:inline", stale ? "text-kumo-warning" : "text-kumo-inactive")}
+      title={stale ? "no successful refresh recently" : "last successful refresh"}
+    >
+      updated {secondsAgo}s ago
+    </span>
+  )
+}
+
+function TopBar({ base, onMenu }: { base: string; onMenu: () => void }) {
   void base
   const [paused, togglePausedState] = live.usePaused()
   const [clusters, setClusters] = React.useState<string[]>([])
@@ -140,6 +156,17 @@ function TopBar({ base }: { base: string }) {
 
   return (
     <div className="flex h-11 shrink-0 items-center justify-end gap-2 border-b border-kumo-line bg-kumo-base px-4">
+      <button
+        type="button"
+        onClick={onMenu}
+        aria-label="open navigation menu"
+        className="mr-auto grid h-7 w-7 shrink-0 cursor-pointer place-items-center rounded-md text-kumo-subtle hover:bg-kumo-tint hover:text-kumo-default lg:hidden"
+      >
+        <List weight="bold" className="h-4 w-4" />
+      </button>
+
+      <FreshnessIndicator />
+
       {clusters.length > 1 && (
         <select
           aria-label="cluster"
@@ -186,6 +213,12 @@ function TopBar({ base }: { base: string }) {
 
 export function Shell({ route, children }: { route: string; children: React.ReactNode }) {
   const base = "/" + (route.split("?")[0].split("/")[1] ?? "overview")
+  const [navOpen, setNavOpen] = React.useState(false)
+
+  // close the mobile drawer whenever the route changes
+  React.useEffect(() => {
+    setNavOpen(false)
+  }, [route])
 
   // theme bootstrap
   React.useEffect(() => {
@@ -222,14 +255,72 @@ export function Shell({ route, children }: { route: string; children: React.Reac
   }, [])
 
   return (
-    <ShellLayout base={base}>{children}</ShellLayout>
+    <ShellLayout base={base} navOpen={navOpen} onMenu={() => setNavOpen(true)} onNavClose={() => setNavOpen(false)}>
+      {children}
+    </ShellLayout>
   )
 }
 
-function ShellLayout({ base, children }: { base: string; children: React.ReactNode }) {
+function ShellLayout({
+  base,
+  navOpen,
+  onMenu,
+  onNavClose,
+  children
+}: {
+  base: string
+  navOpen: boolean
+  onMenu: () => void
+  onNavClose: () => void
+  children: React.ReactNode
+}) {
+  const [busDown, setBusDownState] = React.useState(live.isBusDown())
+  React.useEffect(() => live.onBusDownChange(setBusDownState), [])
+
   return (
     <div className="flex h-full">
-      <aside className="flex w-52 shrink-0 flex-col border-r border-kumo-line bg-kumo-elevated">
+      {/* desktop sidebar */}
+      <aside className="hidden w-52 shrink-0 flex-col border-r border-kumo-line bg-kumo-elevated lg:flex">
+        <SidebarContent base={base} />
+      </aside>
+
+      {/* mobile off-canvas drawer */}
+      {navOpen && (
+        <div className="fixed inset-0 z-40 lg:hidden" onClick={onNavClose}>
+          <div className="absolute inset-0 bg-black/40" />
+          <aside
+            className="absolute inset-y-0 left-0 flex w-60 flex-col border-r border-kumo-line bg-kumo-base shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <SidebarContent base={base} onNavigate={onNavClose} />
+          </aside>
+        </div>
+      )}
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        <TopBar base={base} onMenu={onMenu} />
+        {busDown && (
+          <div className="border-b border-kumo-warning/30 bg-kumo-warning-tint px-4 py-1.5 text-[12px] text-kumo-warning">
+            Live updates unavailable — retrying…
+          </div>
+        )}
+        <main className="min-h-0 flex-1 overflow-y-auto p-5">{children}</main>
+      </div>
+    </div>
+  )
+}
+
+function SidebarContent({ base, onNavigate }: { base: string; onNavigate?: () => void }) {
+  React.useEffect(() => {
+    const closeOnEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onNavigate?.()
+    }
+    window.addEventListener("keydown", closeOnEsc)
+    return () => window.removeEventListener("keydown", closeOnEsc)
+  }, [onNavigate])
+
+  return (
+    <>
         <div className="flex items-center gap-2 px-4 py-4">
           <span className="grid h-7 w-7 place-items-center rounded-md bg-kumo-brand text-sm font-bold !text-white">
             c
@@ -240,31 +331,28 @@ function ShellLayout({ base, children }: { base: string; children: React.ReactNo
           </div>
         </div>
         <nav className="mt-2 flex flex-1 flex-col gap-4 px-2">
-          <NavGroup label="Cluster" base={base} items={NAV.filter((n) => NAV_GROUP_CLUSTER.has(n.to))} />
-          <NavGroup label="Work" base={base} items={NAV.filter((n) => NAV_GROUP_WORK.has(n.to))} />
+          <NavGroup label="Cluster" base={base} items={NAV.filter((n) => NAV_GROUP_CLUSTER.has(n.to))} onNavigate={onNavigate} />
+          <NavGroup label="Work" base={base} items={NAV.filter((n) => NAV_GROUP_WORK.has(n.to))} onNavigate={onNavigate} />
         </nav>
         <div className="border-t border-kumo-line px-4 py-3 text-[11px] leading-4 text-kumo-subtle">
           reads the cluster's SQL storage
           <br />
           <span className="text-kumo-inactive">1–{NAV.length} switch · / search · esc close</span>
         </div>
-      </aside>
-      <div className="flex min-w-0 flex-1 flex-col">
-        <TopBar base={base} />
-        <main className="min-h-0 flex-1 overflow-y-auto p-5">{children}</main>
-      </div>
-    </div>
+    </>
   )
 }
 
 function NavGroup({
   label,
   base,
-  items
+  items,
+  onNavigate
 }: {
   label: string
   base: string
   items: typeof NAV
+  onNavigate?: () => void
 }) {
   return (
     <div>
@@ -280,6 +368,7 @@ function NavGroup({
               key={item.to}
               to={item.to}
               aria-current={active ? "page" : undefined}
+              onClick={onNavigate}
               className={cn(
                 "group flex items-center gap-2.5 rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors cursor-pointer",
                 active
@@ -325,11 +414,20 @@ export function PageHeader({
   )
 }
 
-export function ErrorNote({ error }: { error: string | null }) {
+export function ErrorNote({ error, onRetry }: { error: string | null; onRetry?: () => void }) {
   if (!error) return null
   return (
-    <div className="mb-3 rounded-md border border-kumo-danger/30 bg-kumo-danger-tint px-3 py-2 text-[13px] text-kumo-danger">
-      {error}
+    <div className="mb-3 flex items-start justify-between gap-3 rounded-md border border-kumo-danger/30 bg-kumo-danger-tint px-3 py-2 text-[13px] text-kumo-danger">
+      <span>{error}</span>
+      {onRetry && (
+        <button
+          type="button"
+          onClick={onRetry}
+          className="shrink-0 cursor-pointer rounded-md border border-kumo-danger/40 px-2 py-0.5 text-[12px] font-medium hover:bg-kumo-danger-tint"
+        >
+          Retry
+        </button>
+      )}
     </div>
   )
 }

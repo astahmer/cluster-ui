@@ -1,8 +1,9 @@
 import * as React from "react"
 import { api, type MessageStatus, type Workflow, type WorkflowRun } from "../api.ts"
-import { ActivityDot } from "../components/pieces.tsx"
+import { ActivityDot, SkeletonTable } from "../components/pieces.tsx"
 import { Badge, Card, CardContent, Table, TBody, TD, TH, THead, TR } from "../components/ui.tsx"
 import { ErrorNote, PageHeader, useLive } from "../shell.tsx"
+import { usePauseWhile } from "../live.ts"
 import { StatusBadge } from "../components/pieces.tsx"
 import { Empty } from "../kumo"
 import { WorkflowRunPage } from "./WorkflowRunDetail.tsx"
@@ -12,9 +13,9 @@ type RunRow = WorkflowRun & { failed?: boolean }
 
 export function WorkflowListPage() {
   const [rows, setRows] = React.useState<Workflow[]>([])
-  const { loading, error } = useLive(async () => setRows(await api.workflows()))
+  const { loading, error, refresh } = useLive(async () => setRows(await api.workflows()))
 
-  if (loading && rows.length === 0) return null
+  if (loading && rows.length === 0) return <SkeletonTable rows={6} cols={4} />
   const totalRuns = rows.reduce((acc, w) => acc + w.runs, 0)
   const totalFailed = rows.reduce((acc, w) => acc + (w.failedRuns ?? 0), 0)
 
@@ -24,7 +25,7 @@ export function WorkflowListPage() {
         title="Workflows"
         subtitle={`${totalRuns} executions across ${rows.length} workflows`}
       />
-      <ErrorNote error={error} />
+      <ErrorNote error={error} onRetry={refresh} />
       {rows.length === 0 ? (
         <Card>
           <CardContent className="py-8">
@@ -68,9 +69,13 @@ export function WorkflowListPage() {
 export function WorkflowRunsPage({ name }: { name: string }) {
   const [runs, setRuns] = React.useState<RunRow[] | null>(null)
   const [openExecution, setOpenExecution] = React.useState<string | null>(null)
-  const { error } = useLive(async () =>
+  const { loading, error, refresh } = useLive(async () =>
     setRuns((await api.workflowRuns(name)) as RunRow[])
   )
+  // stop background polling while the run-detail panel is open so it doesn't rerender under the cursor
+  usePauseWhile(openExecution !== null)
+
+  if (loading && runs === null) return <SkeletonTable rows={8} cols={4} />
 
   return (
     <div>
@@ -79,7 +84,7 @@ export function WorkflowRunsPage({ name }: { name: string }) {
           ← all workflows
         </a>
       </PageHeader>
-      <ErrorNote error={error} />
+      <ErrorNote error={error} onRetry={refresh} />
       <div className="rounded-lg border border-kumo-line bg-kumo-base">
         <Table>
           <THead>

@@ -1,15 +1,15 @@
 import * as React from "react"
 import { api, type EntityStat } from "../api.ts"
-import { ActivityDot } from "../components/pieces.tsx"
+import { ActivityDot, SkeletonTable } from "../components/pieces.tsx"
 import { Badge, Input, Table, TBody, TD, TH, THead, TR } from "../components/ui.tsx"
 import { ErrorNote, PageHeader, usePolling } from "../shell.tsx"
 
 export function EntitiesPage() {
   const [rows, setRows] = React.useState<EntityStat[]>([])
   const [q, setQ] = React.useState("")
-  const { loading, error } = usePolling(async () => setRows(await api.entities()))
+  const { loading, error, refresh } = usePolling(async () => setRows(await api.entities()))
 
-  if (loading && rows.length === 0) return null
+  if (loading && rows.length === 0) return <SkeletonTable />
   const filtered = rows.filter((r) => r.entityType.toLowerCase().includes(q.toLowerCase()))
 
   return (
@@ -23,7 +23,7 @@ export function EntitiesPage() {
           data-search-input
         />
       </PageHeader>
-      <ErrorNote error={error} />
+      <ErrorNote error={error} onRetry={refresh} />
       <div className="rounded-lg border border-kumo-line bg-kumo-base">
         <Table>
           <THead>

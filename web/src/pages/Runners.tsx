@@ -4,12 +4,13 @@ import { api, type Runner } from "../api.ts"
 import { Badge, Table, TBody, TD, TH, THead, TR } from "../components/ui.tsx"
 import { ErrorNote, PageHeader, useLive } from "../shell.tsx"
 import { Empty } from "../kumo"
+import { SkeletonTable } from "../components/pieces.tsx"
 
 export function RunnersPage() {
   const [rows, setRows] = React.useState<Runner[]>([])
-  const { loading, error } = useLive(async () => setRows(await api.runners()))
+  const { loading, error, refresh } = useLive(async () => setRows(await api.runners()))
 
-  if (loading && rows.length === 0) return null
+  if (loading && rows.length === 0) return <SkeletonTable />
   const totalShards = rows.reduce((acc, r) => acc + r.shards, 0)
   const staleCount = rows.filter((r) => r.stale).length
 
@@ -19,7 +20,7 @@ export function RunnersPage() {
         title="Runners"
         subtitle="registered cluster nodes and their shard load"
       />
-      <ErrorNote error={error} />
+      <ErrorNote error={error} onRetry={refresh} />
       <div className="rounded-lg border border-kumo-line bg-kumo-base">
         <Table>
           <THead>

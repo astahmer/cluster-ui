@@ -1,4 +1,5 @@
 import * as React from "react"
+import { SkeletonLine } from "../kumo"
 import { api, type MessageDetail, type MessageStatus } from "../api.ts"
 import { relTime } from "../format.ts"
 import { Badge, Button, Card, CardContent, CardHeader, CardTitle, cn, type StatusTone } from "./ui.tsx"
@@ -121,5 +122,47 @@ export function ActivityDot({ at }: { at: number | null }) {
       <span className="h-1.5 w-1.5 rounded-full bg-kumo-brand/70" />
       {relTime(at)}
     </span>
+  )
+}
+
+/* ------------------------------ skeletons -------------------------------- */
+
+/** Keeps skeleton UI visible for >=250ms so fast loads don't flash. */
+export function useSkeletonDelay(loading: boolean): boolean {
+  const [show, setShow] = React.useState(loading)
+  React.useEffect(() => {
+    if (!loading) {
+      const t = setTimeout(() => setShow(false), 250)
+      return () => clearTimeout(t)
+    }
+    setShow(true)
+  }, [loading])
+  return show && loading
+}
+
+export function SkeletonTable({ rows = 8, cols = 5 }: { rows?: number; cols?: number }) {
+  return (
+    <div className="flex flex-col gap-2.5 rounded-md border border-kumo-line p-4">
+      {Array.from({ length: rows }, (_, r) => (
+        <div key={r} className="flex items-center gap-3">
+          {Array.from({ length: cols }, (_, c) => (
+            <SkeletonLine key={c} blockHeight={14} className="flex-1" />
+          ))}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+export function SkeletonCards({ count = 4 }: { count?: number }) {
+  return (
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      {Array.from({ length: count }, (_, i) => (
+        <div key={i} className="flex flex-col gap-2 rounded-md border border-kumo-line p-4">
+          <SkeletonLine blockHeight={11} maxWidth={40} />
+          <SkeletonLine blockHeight={26} maxWidth={30} minDelay={0.1} />
+        </div>
+      ))}
+    </div>
   )
 }

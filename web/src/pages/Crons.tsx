@@ -5,6 +5,7 @@ import { fmtCountdown, fmtTime, relTime } from "../format.ts"
 import { ErrorNote, PageHeader, usePolling } from "../shell.tsx"
 import { ClockCounterClockwise } from "@phosphor-icons/react"
 import { Empty } from "../kumo"
+import { SkeletonTable } from "../components/pieces.tsx"
 
 function statusToneFor(status: CronJob["lastStatus"]) {
   switch (status) {
@@ -23,9 +24,9 @@ function statusToneFor(status: CronJob["lastStatus"]) {
 
 export function CronsPage() {
   const [rows, setRows] = React.useState<CronJob[]>([])
-  const { loading, error } = usePolling(async () => setRows(await api.crons()))
+  const { loading, error, refresh } = usePolling(async () => setRows(await api.crons()))
 
-  if (loading && rows.length === 0) return null
+  if (loading && rows.length === 0) return <SkeletonTable />
 
   const overdue = (c: CronJob) =>
     c.lastStatus !== "done" && c.nextRunAt !== null && c.nextRunAt < Date.now()
@@ -36,7 +37,7 @@ export function CronsPage() {
         title="Crons"
         subtitle="scheduled ClusterCron jobs — next delivery derived from stored deliver_at"
       />
-      <ErrorNote error={error} />
+      <ErrorNote error={error} onRetry={refresh} />
       {rows.length === 0 ? (
         <Empty
           icon={<ClockCounterClockwise className="h-8 w-8 text-kumo-subtle" />}

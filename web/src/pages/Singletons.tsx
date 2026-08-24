@@ -1,0 +1,111 @@
+import * as React from "react"
+import { CirclesThree } from "@phosphor-icons/react"
+import { api, type RunnerReport } from "../api.ts"
+import { Badge, Table, TBody, TD, TH, THead, TR } from "../components/ui.tsx"
+import { ErrorNote, PageHeader, useLive } from "../shell.tsx"
+import { Empty, Tooltip } from "../kumo"
+/**
+ * Singleton visibility page. Runner-resident state (singletons, in-memory
+ * entities) is only visible for runners that mount the optional
+ * @effect/cluster-ui-reporter package; unreachable reporters show as a muted
+ * per-runner error rather than failing the whole view.
+ */
+export function SingletonsPage() {
+  const [runners, setRunners] = React.useState<RunnerReport[]>([])
+  const { loading, error, refresh } = useLive(async () => setRunners((await api.singletons()).runners))
+
+  if (loading && runners.length === 0) return null
+
+  const reporting = runners.filter((r) => r.state)
+  const totalSingletons = reporting.reduce((acc, r) => acc + (r.state?.singletons?.length ?? 0), 0)
+
+  return (
+    <div>
+      <PageHeader
+        title="Singletons"
+        subtitle="runner-resident singleton entities and in-memory entity counts"
+      />
+      <ErrorNote error={error} onRetry={refresh} />
+
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-[12px] text-kumo-subtle">
+        <Badge tone={reporting.length > 0 ? "ok" : "neutral"}>
+          {reporting.length}/{runners.length} runners reporting
+        </Badge>
+        <Badge tone="accent">{totalSingletons} singletons</Badge>
+      </div>
+
+      <div className="rounded-lg border border-kumo-line bg-kumo-base">
+        <Table>
+          <THead>
+            <TR>
+              <TH>Runner</TH>
+              <TH>Reporter</TH>
+              <TH>Singletons</TH>
+              <TH className="text-right">Entities in memory</TH>
+              <TH>Entity types</TH>
+            </TR>
+          </THead>
+          <TBody>
+            {runners.map((r) => (
+              <TR key={r.address}>
+                <TD className="font-medium">{r.address}</TD>
+                <TD>
+                  {r.state ? <Badge tone="ok">ok</Badge> : <ReporterMissing reason={r.error} />}
+                </TD>
+                <TD>
+                  {(r.state?.singletons?.length ?? 0) > 0 ? (
+                    <div className="flex flex-wrap gap-1">
+                      {(r.state?.singletons ?? []).map((s) => (
+                        <Badge key={s.name} tone="info">
+                          {s.name}
+                        </Badge>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-kumo-subtle">—</span>
+                  )}
+                </TD>
+                <TD className="text-right tabular-nums">
+                  {r.state?.entitiesInMemory ?? <span className="text-kumo-subtle">—</span>}
+                </TD>
+                <TD className="text-kumo-subtle">
+                  {(r.state?.registeredEntityTypes?.length ?? 0) > 0
+                    ? r.state?.registeredEntityTypes?.join(", ")
+                    : "—"}
+                </TD>
+              </TR>
+            ))}
+          </TBody>
+        </Table>
+        {runners.length === 0 && (
+          <Empty
+            icon={<CirclesThree className="h-8 w-8 text-kumo-subtle" />}
+            title="No runners registered"
+            description="Runner addresses come from shard storage."
+          />
+        )}
+      </div>
+
+      <p className="mt-2 text-[12px] leading-4 text-kumo-subtle">
+        Singleton state lives in each runner's memory — mount the optional{" "}
+        <code className="rounded bg-kumo-canvas px-1 py-0.5">@effect/cluster-ui-reporter</code>{" "}
+        package in your runner app to make it visible here.
+      </p>
+    </div>
+  )
+}
+
+function ReporterMissing({ reason }: { reason?: string }) {
+  return (
+    <Tooltip
+      content={
+        <span className="text-xs">
+          {reason ? `fetch failed: ${reason} — ` : ""}mount @effect/cluster-ui-reporter on this
+          runner to expose GET /internal/cluster-ui/state.
+        </span>
+      }
+    >
+      <span className="cursor-help text-[12px] text-kumo-inactive">reporter not reachable</span>
+    </Tooltip>
+  )
+}

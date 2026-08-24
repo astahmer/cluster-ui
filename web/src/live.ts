@@ -1,4 +1,5 @@
 import * as React from "react"
+import { markFresh } from "./freshness.ts"
 
 /**
  * Shared live-refresh bus.
@@ -15,12 +16,41 @@ import * as React from "react"
 
 type Subscriber = () => void
 
+type DownSubscriber = (down: boolean) => void
+
 const subscribers = new Set<Subscriber>()
+const downSubscribers = new Set<DownSubscriber>()
 const pauseSubscribers = new Set<(paused: boolean) => void>()
 
 let paused = false
 let source: EventSource | null = null
 let fallbackTimer: ReturnType<typeof setInterval> | null = null
+
+// bus health: a wakeup source is "down" when it failed and no success came after
+let sseFailed = false
+let pollFailed = false
+
+function setSseFailed(next: boolean) {
+  if (sseFailed === next) return
+  sseFailed = next
+  recomputeBusDown()
+}
+
+function setPollFailed(next: boolean) {
+  if (pollFailed === next) return
+  pollFailed = next
+  recomputeBusDown()
+}
+
+function recomputeBusDown() {
+  const next = source === null ? sseFailed && pollFailed && fallbackTimer !== null : sseFailed
+  if (next !== busDown) {
+    busDown = next
+    downSubscribers.forEach((fn) => fn(busDown))
+  }
+}
+
+let busDown = false
 
 function notify() {
   if (paused) return
@@ -43,14 +73,17 @@ function connect() {
   try {
     const es = new EventSource("/api/events")
     es.addEventListener("overview", notify as EventListener)
+    es.addEventListener("overview", () => setSseFailed(false) as unknown as EventListener)
     es.onerror = () => {
       es.close()
       source = null
+      setSseFailed(true)
       // stream unavailable (proxy, auth, older server) → poll instead
       startFallback()
     }
     source = es
   } catch {
+    setSseFailed(true)
     startFallback()
   }
 }
@@ -80,6 +113,41 @@ export function usePaused(): [boolean, (next: boolean) => void] {
   return [value, setPaused]
 }
 
+/** True when every wakeup source has recently failed — shell renders a banner. */
+export function isBusDown(): boolean {
+  return busDown
+}
+
+/** Subscribe to bus-health changes; returns an unsubscribe function. */
+export function onBusDownChange(fn: (down: boolean) => void): () => void {
+  downSubscribers.add(fn)
+  return () => {
+    downSubscribers.delete(fn)
+  }
+}
+
+/** Pause refreshes while `open` is true; restores the previous state on close/unmount. */
+export function usePauseWhile(open: boolean) {
+  const restoreRef = React.useRef<boolean | null>(null)
+  React.useEffect(() => {
+    if (!open) {
+      if (restoreRef.current !== null) {
+        setPaused(restoreRef.current)
+        restoreRef.current = null
+      }
+      return
+    }
+    if (restoreRef.current === null) restoreRef.current = paused
+    setPaused(true)
+    return () => {
+      if (restoreRef.current !== null) {
+        setPaused(restoreRef.current)
+        restoreRef.current = null
+      }
+    }
+  }, [open])
+}
+
 export interface LiveHandle {
   loading: boolean
   error: string | null
@@ -100,9 +168,18 @@ export function useLive(fetcher: () => Promise<unknown>, deps: unknown[] = []): 
     const load = async () => {
       try {
         await fetchRef.current()
-        if (alive) setError(null)
+        if (alive) {
+          setError(null)
+          setPollFailed(false)
+          markFresh()
+        }
       } catch (e) {
-        if (alive) setError(String(e))
+        if (alive) {
+          setError(String(e))
+          // only meaningful while polling is the active source; SSE pages also
+          // fetch on wake, so track failures regardless of transport
+          setPollFailed(true)
+        }
       } finally {
         if (alive) setLoading(false)
       }

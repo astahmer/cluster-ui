@@ -2,7 +2,7 @@ import * as React from "react"
 import { api, type MetricPoint, type Overview } from "../api.ts"
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui.tsx"
 import { Sparkline } from "../components/sparkline.tsx"
-import { ActivityDot, StatCard } from "../components/pieces.tsx"
+import { ActivityDot, SkeletonCards, SkeletonTable, StatCard } from "../components/pieces.tsx"
 import { Badge } from "../components/ui.tsx"
 import { ErrorNote, PageHeader, useLive } from "../shell.tsx"
 import { Banner } from "../kumo"
@@ -25,7 +25,14 @@ export function OverviewPage() {
   const overviewLive = useLive(() => loadOverview.current())
   useLive(() => loadHistory.current())
 
-  if (overviewLive.loading && !data) return null
+  if (overviewLive.loading && !data)
+    return (
+      <div className="space-y-4">
+        <SkeletonCards />
+        <SkeletonCards count={2} />
+        <SkeletonTable rows={5} cols={4} />
+      </div>
+    )
   const m = data!.messages
   const shards = data!.shards
   const unassigned = data!.unassignedShards ?? shards.total - shards.assigned
@@ -33,7 +40,7 @@ export function OverviewPage() {
   return (
     <div>
       <PageHeader title="Overview" subtitle="live cluster state" />
-      <ErrorNote error={overviewLive.error} />
+      <ErrorNote error={overviewLive.error} onRetry={overviewLive.refresh} />
 
       {unassigned > 0 && (
         <Banner

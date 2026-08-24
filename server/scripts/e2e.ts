@@ -7,6 +7,7 @@ import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer"
 import * as NodeRuntime from "@effect/platform-node-shared/NodeRuntime"
 import { Effect, Layer } from "effect"
 import { createServer } from "node:http"
+import { spawn, type ChildProcess } from "node:child_process"
 import { resolve } from "node:path"
 import { api, clusterRepos } from "../src/api.ts"
 import * as metrics from "../src/metrics.ts"
@@ -34,6 +35,22 @@ async function check(name: string, path: string, expect: (body: any) => boolean)
 }
 
 async function run() {
+  // demo reporter for the 127.0.0.1:9199 seeded runner
+  const demo = spawn("npx", ["tsx", resolve("server/scripts/demo-runner.ts")], { stdio: "ignore" })
+  try {
+    // wait for the demo reporter to accept connections (best effort)
+    for (let i = 0; i < 20; i++) {
+      const up = await fetch("http://127.0.0.1:9199/internal/cluster-ui/state").then((r) => r.ok).catch(() => false)
+      if (up) break
+      await new Promise((r) => setTimeout(r, 250))
+    }
+    await runChecks()
+  } finally {
+    demo.kill("SIGKILL")
+  }
+}
+
+async function runChecks() {
   await check("healthz", "/healthz", () => true)
   const cfg = await check("config", "/api/config", (b) =>
     Array.isArray(b.clusters) && b.clusters.length > 0 && "readonly" in b)
@@ -50,6 +67,12 @@ async function run() {
     Array.isArray(b.rows) && b.rows.length > 0 && b.rows[0].entityId && "failed" in b.rows[0])
   await check("crons", "/api/crons", (b) =>
     Array.isArray(b) && b.length >= 2 && b.every((c: any) => c.name.startsWith("ClusterCron/") || typeof c.nextRunAt === "number"))
+  await check("singletons", "/api/singletons", (b) =>
+    Array.isArray(b.runners) && b.runners.length > 0 &&
+    // demo reporter answers with 3 singletons on 127.0.0.1:9199
+    b.runners.some((r: any) => r.state?.singletons?.length === 3) &&
+    // unreachable runners degrade to error entries instead of failing the request
+    b.runners.some((r: any) => !r.state && typeof r.error === "string"))
   await new Promise((r) => setTimeout(r, 300)) // let the sampler take its first sample
   await check("metrics history", "/api/metrics/history", (b) =>
     Array.isArray(b) && b.length > 0 && "failed" in b[0] && "unassignedShards" in b[0])

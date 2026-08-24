@@ -6,6 +6,8 @@ import {
   type WorkflowRunDetail
 } from "../api.ts"
 import { JsonBlock, StatusBadge, statusTone } from "../components/pieces.tsx"
+import { confirmDialog } from "../components/dialogs.tsx"
+import { toast } from "../toast.tsx"
 import { Badge, Button } from "../components/ui.tsx"
 import { Banner, Text, cn } from "../kumo"
 import { fmtTime } from "../format.ts"
@@ -60,22 +62,35 @@ export function WorkflowRunPage({
 
   const act = async (kind: "retry" | "interrupt") => {
     if (!run) return
-    const what =
-      kind === "retry" ?
-        `Retry workflow run "${executionId}"? The run message will be re-delivered to its entity.` :
-        `Cancel workflow run "${executionId}"? An Interrupt envelope will be written and consumed by the cluster.`
-    if (!window.confirm(what)) return
+    if (
+      !(await confirmDialog({
+        title:
+          kind === "retry" ?
+            `Retry workflow run "${executionId}"?` :
+            `Cancel workflow run "${executionId}"?`,
+        description:
+          kind === "retry" ?
+            "The run message will be re-delivered to its entity." :
+            "An Interrupt envelope will be written and consumed by the cluster.",
+        destructive: true,
+        confirmLabel: kind === "retry" ? "Retry" : "Cancel run"
+      }))
+    )
+      return
     setBusy(true)
     setActionError(null)
     try {
       if (kind === "retry") await api.retryMessage(run.id)
       else await api.interruptMessage(run.id)
+      toast.success(kind === "retry" ? "Run retry queued" : "Interrupt written")
       triggerRefresh()
       onChanged?.()
       // give the write a beat to land before refetching
       setTimeout(() => reload.current(), 250)
     } catch (e) {
-      setActionError(e instanceof Error ? e.message : String(e))
+      const msg = e instanceof Error ? e.message : String(e)
+      setActionError(msg)
+      toast.error(`${kind} failed: ${msg}`)
     } finally {
       setBusy(false)
     }

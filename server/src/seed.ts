@@ -155,7 +155,8 @@ const seed = db.transaction(() => {
   const runners = [
     { host: "10.0.4.11", port: 8080, groups: ["api"], version: 2 },
     { host: "10.0.4.12", port: 8080, groups: ["api"], version: 2 },
-    { host: "10.0.4.13", port: 8080, groups: ["worker"], version: 1 },
+    // localhost runner — run `pnpm demo-runner` to see live reporter state in the UI
+    { host: "127.0.0.1", port: 9199, groups: ["worker"], version: 1 },
     // registered but owns no shards — shows up as STALE in the UI
     { host: "10.0.4.14", port: 8080, groups: ["worker"], version: 1 }
   ]

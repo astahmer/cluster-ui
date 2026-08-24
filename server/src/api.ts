@@ -7,6 +7,7 @@ import { AUTH_COOKIE, verifyToken } from "./auth.ts"
 import * as metrics from "./metrics.ts"
 import { config } from "./config.ts"
 import { makeRepo, openDb, type MessageQuery, type Repo } from "./queries.ts"
+import { queryRunnerState } from "./singletons.ts"
 
 // ------------------------------------------------------------- cluster registry
 const repos = new Map<string, Repo>(
@@ -203,6 +204,15 @@ const baseRouter = HttpRouter.empty.pipe(
     Effect.map(req, (p) => {
       const repo = repoFor(p.cluster)
       return repo ? json(repo.crons()) : notFound("cluster")
+    })
+  ),
+
+  HttpRouter.get(
+    "/api/singletons",
+    Effect.flatMap(req, (p) => {
+      const repo = repoFor(p.cluster)
+      if (!repo) return Effect.succeed(notFound("cluster"))
+      return Effect.map(Effect.tryPromise(() => queryRunnerState(repo)), json)
     })
   ),
 

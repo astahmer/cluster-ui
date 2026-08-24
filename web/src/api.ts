@@ -263,6 +263,22 @@ export interface AuthResponse {
   ok: boolean
 }
 
+export interface ReporterSingletonInfo {
+  name: string
+  address?: string | null
+  startedAt?: number | string | null
+}
+
+export interface RunnerReport {
+  address: string
+  state?: {
+    singletons?: ReporterSingletonInfo[]
+    entitiesInMemory?: number
+    registeredEntityTypes?: string[]
+  }
+  error?: string
+}
+
 export const api = {
   overview: () => get<Overview>("/api/overview"),
   runners: () => get<Runner[]>("/api/runners"),
@@ -282,6 +298,7 @@ export const api = {
       )}`
     ),
   crons: () => get<CronJob[]>("/api/crons"),
+  singletons: () => get<{ runners: RunnerReport[] }>("/api/singletons"),
   metricsHistory: () => get<MetricPoint[]>("/api/metrics/history"),
   config: () => get<AppConfig>("/api/config"),
   clusters: () => get<{ name: string }[]>("/api/clusters"),
