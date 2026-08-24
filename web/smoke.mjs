@@ -111,6 +111,18 @@ window.addEventListener("error", (e) => {
 window.addEventListener("unhandledrejection", (e) => {
   console.log("[unhandledrejection]", String(e.reason).slice(0, 300))
 })
+// jsdom lacks these; kumo/Base UI components use them
+window.ResizeObserver ??= class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+window.IntersectionObserver ??= class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+  takeRecords() { return [] }
+}
 window.EventSource = class {
   constructor() {
     setTimeout(() => this.onerror?.(new Event("error")), 0)

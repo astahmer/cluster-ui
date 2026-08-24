@@ -9,13 +9,14 @@
 import * as React from "react"
 import { cn } from "./ui.tsx"
 
+// kumo semantic tokens — light/dark handled by the CSS vars themselves
 export const TONE_COLORS = {
-  accent: "var(--color-accent)",
-  ok: "var(--color-ok)",
-  warn: "var(--color-warn)",
-  err: "var(--color-err)",
-  info: "var(--color-info)",
-  muted: "var(--color-muted)"
+  accent: "var(--color-kumo-brand)",
+  ok: "var(--color-kumo-success)",
+  warn: "var(--color-kumo-warning)",
+  err: "var(--color-kumo-danger)",
+  info: "var(--color-kumo-info)",
+  muted: "var(--color-kumo-subtle)"
 } as const
 
 export type SparklineTone = keyof typeof TONE_COLORS
@@ -53,7 +54,7 @@ export function Sparkline({
     return (
       <div
         className={cn(
-          "flex items-center justify-center rounded-md border border-dashed border-border text-[11px] text-muted",
+          "flex items-center justify-center rounded-md border border-dashed border-kumo-line text-[11px] text-kumo-inactive",
           className
         )}
         style={{ height }}
@@ -113,7 +114,7 @@ export function Sparkline({
         />
       </svg>
       {showLastLabel && (
-        <span className="absolute right-0 top-0 rounded bg-surface/80 px-1 text-[11px] font-semibold tabular-nums text-text">
+        <span className="absolute right-0 top-0 rounded bg-kumo-base/80 px-1 text-[11px] font-semibold tabular-nums text-kumo-default">
           {formatValue(last.v)}
         </span>
       )}

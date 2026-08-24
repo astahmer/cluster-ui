@@ -1,8 +1,10 @@
 import * as React from "react"
 import { api, type CronJob } from "../api.ts"
-import { Badge } from "../components/ui.tsx"
+import { Badge, Table, TBody, TD, TH, THead, TR } from "../components/ui.tsx"
 import { fmtCountdown, fmtTime, relTime } from "../format.ts"
 import { ErrorNote, PageHeader, usePolling } from "../shell.tsx"
+import { ClockCounterClockwise } from "@phosphor-icons/react"
+import { Empty } from "../kumo"
 
 function statusToneFor(status: CronJob["lastStatus"]) {
   switch (status) {
@@ -25,6 +27,9 @@ export function CronsPage() {
 
   if (loading && rows.length === 0) return null
 
+  const overdue = (c: CronJob) =>
+    c.lastStatus !== "done" && c.nextRunAt !== null && c.nextRunAt < Date.now()
+
   return (
     <div>
       <PageHeader
@@ -33,43 +38,52 @@ export function CronsPage() {
       />
       <ErrorNote error={error} />
       {rows.length === 0 ? (
-        <div className="rounded-lg border border-border bg-surface p-10 text-center text-[13px] text-muted">
-          No cron jobs recorded. Jobs appear here once a <code>ClusterCron</code> layer runs in the
-          cluster (entity types named <code>ClusterCron/&lt;name&gt;</code>).
-        </div>
+        <Empty
+          icon={<ClockCounterClockwise className="h-8 w-8 text-kumo-subtle" />}
+          title="No cron jobs recorded"
+          description="Jobs appear here once a ClusterCron layer runs in the cluster."
+          commandLine="entity types named ClusterCron/<name>"
+          className="rounded-lg border border-kumo-line bg-kumo-base"
+        />
       ) : (
-        <div className="rounded-lg border border-border bg-surface">
-          <table className="w-full text-[13px]">
-            <thead>
-              <tr className="border-b border-border [&>th]:px-3 [&>th]:py-2 [&>th]:text-left [&>th]:text-[11px] [&>th]:font-semibold [&>th]:uppercase [&>th]:tracking-wide [&>th]:text-muted">
-                <th>Name</th>
-                <th>Last run</th>
-                <th>Next run</th>
-                <th>Last status</th>
-              </tr>
-            </thead>
-            <tbody>
+        <div className="overflow-hidden rounded-lg border border-kumo-line bg-kumo-base">
+          <Table>
+            <THead>
+              <TR>
+                <TH>Name</TH>
+                <TH>Last run</TH>
+                <TH>Next run</TH>
+                <TH>Last status</TH>
+              </TR>
+            </THead>
+            <TBody>
               {rows.map((c) => (
-                <tr key={c.entityType} className="border-b border-border/60 hover:bg-surface-2/60">
-                  <td className="px-3 py-2 font-medium">{c.name}</td>
-                  <td className="whitespace-nowrap px-3 py-2 text-muted" title={fmtTime(c.lastRunAt)}>
+                <TR key={c.entityType} className={overdue(c) ? "bg-kumo-danger-tint/50" : undefined}>
+                  <TD className="font-medium">{c.name}</TD>
+                  <TD className="whitespace-nowrap text-kumo-subtle" title={fmtTime(c.lastRunAt)}>
                     {relTime(c.lastRunAt)}
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-2 tabular-nums">
+                  </TD>
+                  <TD className="whitespace-nowrap tabular-nums">
                     {c.nextRunAt !== null ? (
                       <span title={fmtTime(c.nextRunAt)}>{fmtCountdown(c.nextRunAt)}</span>
                     ) : (
-                      <span className="text-muted">—</span>
+                      <span className="text-kumo-subtle">—</span>
                     )}
-                  </td>
-                  <td className="px-3 py-2">
+                  </TD>
+                  <TD>
                     <Badge tone={statusToneFor(c.lastStatus)}>{c.lastStatus}</Badge>
-                  </td>
-                </tr>
+                  </TD>
+                </TR>
               ))}
-            </tbody>
-          </table>
+            </TBody>
+          </Table>
         </div>
+      )}
+      {rows.some(overdue) && (
+        <p className="mt-2 flex items-center gap-1.5 text-[12px] text-kumo-danger">
+          Rows highlighted red have a next-run time already in the past — the cron entity is
+          likely stuck or its runner went away.
+        </p>
       )}
     </div>
   )

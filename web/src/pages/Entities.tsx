@@ -24,7 +24,7 @@ export function EntitiesPage() {
         />
       </PageHeader>
       <ErrorNote error={error} />
-      <div className="rounded-lg border border-border bg-surface">
+      <div className="rounded-lg border border-kumo-line bg-kumo-base">
         <Table>
           <THead>
             <TR>
@@ -49,21 +49,21 @@ export function EntitiesPage() {
                     {isWorkflow ? (
                       <a
                         href={`#/workflows/${encodeURIComponent(name)}`}
-                        className="font-medium text-text hover:text-accent"
+                        className="font-medium text-kumo-default hover:text-kumo-link"
                       >
                         {name} <Badge tone="info" className="ml-1.5">workflow</Badge>
                       </a>
                     ) : isCron ? (
                       <a
                         href={`#/crons`}
-                        className="font-medium text-text hover:text-accent"
+                        className="font-medium text-kumo-default hover:text-kumo-link"
                       >
                         {r.entityType} <Badge tone="accent" className="ml-1.5">cron</Badge>
                       </a>
                     ) : (
                       <a
                         href={`#/entities/${encodeURIComponent(r.entityType)}`}
-                        className="font-medium text-text hover:text-accent"
+                        className="font-medium text-kumo-default hover:text-kumo-link"
                         title="view entity instances"
                       >
                         <code>{r.entityType}</code>
@@ -73,15 +73,15 @@ export function EntitiesPage() {
                   <TD className="text-right tabular-nums">{r.entities}</TD>
                   <TD className="text-right tabular-nums">{r.messages}</TD>
                   <TD className="text-right tabular-nums">
-                    {r.pending > 0 ? <Badge tone="warn">{r.pending}</Badge> : <span className="text-muted">0</span>}
+                    {r.pending > 0 ? <Badge tone="warn">{r.pending}</Badge> : <span className="text-kumo-subtle">0</span>}
                   </TD>
                   <TD className="text-right tabular-nums">
-                    {r.inflight > 0 ? <Badge tone="info">{r.inflight}</Badge> : <span className="text-muted">0</span>}
+                    {r.inflight > 0 ? <Badge tone="info">{r.inflight}</Badge> : <span className="text-kumo-subtle">0</span>}
                   </TD>
                   <TD className="text-right tabular-nums">
-                    {r.scheduled > 0 ? <Badge tone="accent">{r.scheduled}</Badge> : <span className="text-muted">0</span>}
+                    {r.scheduled > 0 ? <Badge tone="accent">{r.scheduled}</Badge> : <span className="text-kumo-subtle">0</span>}
                   </TD>
-                  <TD className="text-right tabular-nums text-muted">{r.done}</TD>
+                  <TD className="text-right tabular-nums text-kumo-subtle">{r.done}</TD>
                   <TD>
                     <ActivityDot at={r.lastActivityAt} />
                   </TD>

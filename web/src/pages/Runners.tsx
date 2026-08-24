@@ -1,7 +1,9 @@
 import * as React from "react"
+import { Cpu } from "@phosphor-icons/react"
 import { api, type Runner } from "../api.ts"
 import { Badge, Table, TBody, TD, TH, THead, TR } from "../components/ui.tsx"
 import { ErrorNote, PageHeader, useLive } from "../shell.tsx"
+import { Empty } from "../kumo"
 
 export function RunnersPage() {
   const [rows, setRows] = React.useState<Runner[]>([])
@@ -18,7 +20,7 @@ export function RunnersPage() {
         subtitle="registered cluster nodes and their shard load"
       />
       <ErrorNote error={error} />
-      <div className="rounded-lg border border-border bg-surface">
+      <div className="rounded-lg border border-kumo-line bg-kumo-base">
         <Table>
           <THead>
             <TR>
@@ -42,7 +44,7 @@ export function RunnersPage() {
                     </Badge>
                   )}
                 </TD>
-                <TD className="text-muted">
+                <TD className="text-kumo-subtle">
                   {r.host ?? "—"}
                   {r.port ? `:${r.port}` : ""}
                 </TD>
@@ -55,7 +57,7 @@ export function RunnersPage() {
                     ))}
                   </div>
                 </TD>
-                <TD className="tabular-nums text-muted">v{r.version ?? "?"}</TD>
+                <TD className="tabular-nums text-kumo-subtle">v{r.version ?? "?"}</TD>
                 <TD className="text-right tabular-nums">{r.shards}</TD>
                 <TD>
                   {r.stale ?
@@ -69,9 +71,16 @@ export function RunnersPage() {
             ))}
           </TBody>
         </Table>
+        {rows.length === 0 && (
+          <Empty
+            icon={<Cpu className="h-8 w-8 text-kumo-subtle" />}
+            title="No runners registered"
+            description="Runners appear in shard storage once a cluster node connects."
+          />
+        )}
       </div>
-      <p className="mt-2 text-[12px] text-muted">
-        <span className="mr-1 inline-block h-2 w-2 rounded-full align-middle bg-warn" />
+      <p className="mt-2 flex items-center gap-1.5 text-[12px] text-kumo-subtle">
+        <span className="mr-1 inline-block h-2 w-2 rounded-full bg-kumo-warning align-middle" />
         stale = registered in shard storage but currently owning zero shards — the
         runner is likely shut down or draining{staleCount > 0 ? ` (${staleCount} detected)` : ""}.
       </p>
@@ -81,9 +90,9 @@ export function RunnersPage() {
 
 function LoadBar({ shards, total }: { shards: number; total: number }) {
   return (
-    <div className="h-2 w-32 overflow-hidden rounded-full bg-bg border border-border">
+    <div className="h-2 w-32 overflow-hidden rounded-full border border-kumo-line bg-kumo-canvas">
       <div
-        className="h-full bg-ok transition-all"
+        className="h-full bg-kumo-success transition-all"
         style={{ width: `${(shards / total) * 100}%` }}
       />
     </div>

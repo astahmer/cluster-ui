@@ -6,11 +6,12 @@ import {
   type MessageStatus,
   type RunResult
 } from "../api.ts"
-import { DetailPanel, JsonBlock, StatusBadge, statusTone, useMessageDetail } from "../components/pieces.tsx"
+import { DetailPanel, StatusBadge, statusTone, useMessageDetail } from "../components/pieces.tsx"
 import { Badge, Button, Input, Select, Table, TBody, TD, TH, THead, TR, cn } from "../components/ui.tsx"
 import { fmtCountdown, fmtTime, relTime } from "../format.ts"
 import { ErrorNote, PageHeader, useEscToClose } from "../shell.tsx"
 import { triggerRefresh, useLive } from "../live.ts"
+import { Banner, CodeBlock, Empty, InputGroup, Tabs, Toolbar } from "../kumo"
 
 /* ------------------------------------------------------------------ config -- */
 
@@ -157,30 +158,26 @@ export function MessagesPage({ initialFilters }: { initialFilters?: MessagesInit
       <PageHeader title="Messages" subtitle={data ? `${data.total.toLocaleString()} matching messages` : undefined} />
 
       {/* status tabs */}
-      <div className="mb-3 flex items-center gap-1">
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            type="button"
-            onClick={() => pickTab(t.key)}
-            className={cn(
-              "rounded-md px-2.5 py-1 text-[12px] font-medium transition-colors cursor-pointer",
-              tab === t.key ? "bg-accent/15 text-accent" : "text-muted hover:bg-surface-2 hover:text-text"
-            )}
-          >
-            {t.label}
-          </button>
-        ))}
+      <div className="mb-3">
+        <Tabs
+          variant="segmented"
+          size="sm"
+          className="w-fit"
+          tabs={TABS.map((t) => ({ value: t.key, label: t.label }))}
+          value={tab}
+          onValueChange={pickTab}
+        />
       </div>
 
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <Input
-          placeholder="search id / entity / tag…"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          className="w-56"
-          data-search-input
-        />
+      <Toolbar className="mb-3 flex-wrap">
+        <InputGroup className="w-56">
+          <InputGroup.Input
+            placeholder="search id / entity / tag…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            data-search-input
+          />
+        </InputGroup>
         <Input
           placeholder="entity type"
           value={entityType}
@@ -199,7 +196,7 @@ export function MessagesPage({ initialFilters }: { initialFilters?: MessagesInit
           }}
           className="w-40"
         />
-        <label className="flex items-center gap-1 text-[11px] uppercase tracking-wide text-muted">
+        <label className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-kumo-subtle">
           after
           <Input
             type="datetime-local"
@@ -211,7 +208,7 @@ export function MessagesPage({ initialFilters }: { initialFilters?: MessagesInit
             className="w-44"
           />
         </label>
-        <label className="flex items-center gap-1 text-[11px] uppercase tracking-wide text-muted">
+        <label className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-kumo-subtle">
           before
           <Input
             type="datetime-local"
@@ -243,11 +240,11 @@ export function MessagesPage({ initialFilters }: { initialFilters?: MessagesInit
             <option value="id">newest first</option>
           </Select>
         )}
-      </div>
+      </Toolbar>
 
       <ErrorNote error={error ?? actionError} />
 
-      <div className="rounded-lg border border-border bg-surface">
+      <div className="rounded-lg border border-kumo-line bg-kumo-base">
         <Table>
           <THead>
             <TR>
@@ -272,8 +269,11 @@ export function MessagesPage({ initialFilters }: { initialFilters?: MessagesInit
             ))}
             {!loading && (!data || data.rows.length === 0) && (
               <TR>
-                <TD colSpan={8} className="py-10 text-center text-muted">
-                  no messages match
+                <TD colSpan={8} className="py-6">
+                  <Empty
+                    title="No messages match"
+                    description="Adjust the search, status tabs or time range."
+                  />
                 </TD>
               </TR>
             )}
@@ -289,7 +289,7 @@ export function MessagesPage({ initialFilters }: { initialFilters?: MessagesInit
         title={<span className="font-mono text-xs">message {openId && shortId(openId)}</span>}
       >
         {detail === null ? (
-          <div className="text-muted">loading…</div>
+          <div className="text-kumo-subtle">loading…</div>
         ) : (
           <MessageDetailBody d={detail} config={config} onAction={runAction} onChanged={refresh} />
         )}
@@ -317,11 +317,11 @@ function MessageRow({
 
   return (
     <TR className="cursor-pointer" onClick={onOpen}>
-      <TD className="font-mono text-xs text-muted">{shortId(m.id)}</TD>
+      <TD className="font-mono text-xs text-kumo-subtle">{shortId(m.id)}</TD>
       <TD>
         <div className="flex items-center gap-1.5">
           {m.failed && (
-            <span title="failed execution" className="text-err">
+            <span title="failed execution" className="text-kumo-danger">
               ✕
             </span>
           )}
@@ -331,17 +331,17 @@ function MessageRow({
       <TD>
         <div className="max-w-72 truncate">
           {m.entityType.startsWith("Workflow/") ? (
-            <span className="text-info">{m.entityType}</span>
+            <span className="text-kumo-info">{m.entityType}</span>
           ) : (
             m.entityType
           )}
-          <span className="text-muted">/{m.entityId}</span>
+          <span className="text-kumo-subtle">/{m.entityId}</span>
         </div>
       </TD>
-      <TD>{m.tag ? <code className="text-xs">{m.tag}</code> : <span className="text-muted">—</span>}</TD>
-      <TD className="tabular-nums text-muted">{m.shardId}</TD>
-      <TD className="tabular-nums text-muted">{m.replyCount || "—"}</TD>
-      <TD className="whitespace-nowrap text-muted">
+      <TD>{m.tag ? <code className="text-xs">{m.tag}</code> : <span className="text-kumo-subtle">—</span>}</TD>
+      <TD className="tabular-nums text-kumo-subtle">{m.shardId}</TD>
+      <TD className="tabular-nums text-kumo-subtle">{m.replyCount || "—"}</TD>
+      <TD className="whitespace-nowrap text-kumo-subtle">
         {scheduledView && m.deliverAt !== null ? (
           <span title={fmtTime(m.deliverAt)}>{fmtCountdown(m.deliverAt)}</span>
         ) : (
@@ -356,7 +356,7 @@ function MessageRow({
             rel="noreferrer"
             title={`trace ${m.traceId}`}
             onClick={(e) => e.stopPropagation()}
-            className="text-accent hover:underline"
+            className="text-kumo-link hover:underline"
           >
             ↗ trace
           </a>
@@ -371,16 +371,42 @@ function MessageRow({
 function OutcomeBanner({ result }: { result: RunResult }) {
   const failure = result.outcome === "Failure"
   return (
-    <div
-      className={cn(
-        "flex items-center justify-between rounded-md border px-3 py-2",
-        failure ? "border-err/40 bg-err/10" : "border-ok/40 bg-ok/10"
+    <Banner
+      variant={failure ? "error" : "default"}
+      size="sm"
+      title={failure ? "✕ Failed" : "✓ Succeeded"}
+      action={<Badge tone={failure ? "err" : "ok"}>{result.outcome}</Badge>}
+    />
+  )
+}
+
+/** JSON viewer built on kumo CodeBlock with a compact truncation mode. */
+function PayloadView({ value, max = 400 }: { value: unknown; max?: number }) {
+  const [open, setOpen] = React.useState(false)
+  if (value === null || value === undefined) return <span className="text-kumo-subtle">—</span>
+  const text = JSON.stringify(value, null, 2)
+  if (!open && text.length > max) {
+    return (
+      <div className="flex items-start gap-2">
+        <div className="min-w-0 flex-1">
+          <CodeBlock code={text.slice(0, max) + "\n…"} lang="jsonc" />
+        </div>
+        <Button variant="ghost" size="sm" onClick={() => setOpen(true)}>
+          more
+        </Button>
+      </div>
+    )
+  }
+  return (
+    <div className="flex flex-col items-start gap-1">
+      <div className="max-h-64 max-w-full overflow-auto [&_pre]:max-h-64">
+        <CodeBlock code={text} lang="jsonc" />
+      </div>
+      {text.length > max && (
+        <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>
+          less
+        </Button>
       )}
-    >
-      <span className={cn("text-[13px] font-semibold", failure ? "text-err" : "text-ok")}>
-        {failure ? "✕ Failed" : "✓ Succeeded"}
-      </span>
-      {!failure && <Badge tone="ok">success</Badge>}
     </div>
   )
 }
@@ -420,10 +446,10 @@ function MessageDetailBody({
     <div className="space-y-4 text-[13px]" data-testid="message-detail">
       {d.result && <OutcomeBanner result={d.result} />}
 
-      <section className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg border border-border bg-surface-2/40 p-3">
+      <section className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg border border-kumo-line bg-kumo-canvas/50 p-3">
         <Field label="Status">
           <div className="flex items-center gap-1.5">
-            {m.failed && <span className="text-err">✕</span>}
+            {m.failed && <span className="text-kumo-danger">✕</span>}
             <StatusBadge status={m.status} />
           </div>
         </Field>
@@ -441,7 +467,7 @@ function MessageDetailBody({
         {m.traceId && (
           <Field label="Trace" wide>
             {traceUrl ? (
-              <a href={traceUrl} target="_blank" rel="noreferrer" className="font-mono text-xs text-accent hover:underline">
+              <a href={traceUrl} target="_blank" rel="noreferrer" className="font-mono text-xs text-kumo-link hover:underline">
                 {m.traceId} ↗
               </a>
             ) : (
@@ -483,7 +509,7 @@ function MessageDetailBody({
         <SectionTitle>Payload</SectionTitle>
         <div className="flex items-start gap-1">
           <div className="min-w-0 flex-1">
-            <JsonBlock value={d.payload} />
+            <PayloadView value={d.payload} />
           </div>
           <Button variant="ghost" size="sm" onClick={() => copyJson(d.payload)} title="copy payload">
             ⧉
@@ -494,7 +520,7 @@ function MessageDetailBody({
       {d.result && (
         <section>
           <SectionTitle>Exit</SectionTitle>
-          <JsonBlock value={d.result.exit} max={600} />
+          <PayloadView value={d.result.exit} max={600} />
         </section>
       )}
 
@@ -504,30 +530,30 @@ function MessageDetailBody({
           {d.replies.some((r) => r.kind === "withExit") && <Badge tone="ok">withExit</Badge>}
         </SectionTitle>
         {d.replies.length === 0 ? (
-          <div className="text-muted">no replies yet</div>
+          <div className="text-kumo-subtle">no replies yet</div>
         ) : (
           <div className="space-y-2">
             {d.replies.map((r) => (
-              <div key={r.id} className="rounded-md border border-border p-2.5">
+              <div key={r.id} className="rounded-md border border-kumo-line p-2.5">
                 <div className="mb-1.5 flex items-center gap-2 text-[12px]">
                   <Badge tone={r.kind === "withExit" ? (isFailureReply(r.payload) ? "err" : "ok") : "neutral"}>
                     {r.kind}
                   </Badge>
                   {r.acked && <Badge tone="accent">acked</Badge>}
-                  {r.sequence !== null && <span className="text-muted">seq {r.sequence}</span>}
-                  <span className="ml-auto flex items-center gap-1 font-mono text-[11px] text-muted">
+                  {r.sequence !== null && <span className="text-kumo-subtle">seq {r.sequence}</span>}
+                  <span className="ml-auto flex items-center gap-1 font-mono text-[11px] text-kumo-subtle">
                     #{shortId(r.id)}
                     <button
                       type="button"
                       title="copy reply"
-                      className="cursor-pointer hover:text-text"
+                      className="cursor-pointer hover:text-kumo-default"
                       onClick={() => copyJson(r.payload)}
                     >
                       ⧉
                     </button>
                   </span>
                 </div>
-                <JsonBlock value={r.payload} max={200} />
+                <PayloadView value={r.payload} max={200} />
               </div>
             ))}
           </div>
@@ -541,9 +567,10 @@ function isFailureReply(payload: unknown): boolean {
   return (
     typeof payload === "object" &&
     payload !== null &&
-    (payload as { _tag?: string })._tag === "WithExit" &&
-    ((payload as { exit?: { _tag?: string } }).exit?._tag === "Failure" ||
-      (payload as { exit?: { defect?: unknown } }).exit?.defect !== undefined ||
+    ((payload as { _tag?: string })._tag === "Failure" ||
+      ((payload as { _tag?: string })._tag === "WithExit" &&
+        ((payload as { exit?: { _tag?: string } }).exit?._tag === "Failure" ||
+          (payload as { exit?: { defect?: unknown } }).exit?.defect !== undefined)) ||
       false)
   )
 }
@@ -559,7 +586,7 @@ export function Field({
 }) {
   return (
     <div className={wide ? "col-span-2 flex flex-col gap-1" : "flex flex-col gap-1"}>
-      <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">{label}</span>
+      <span className="text-[11px] font-semibold uppercase tracking-wide text-kumo-subtle">{label}</span>
       <span className="truncate">{children}</span>
     </div>
   )
@@ -567,7 +594,7 @@ export function Field({
 
 export function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
-    <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted">{children}</h3>
+    <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-kumo-subtle">{children}</h3>
   )
 }
 
@@ -585,7 +612,7 @@ function Pager({
   const pages = Math.max(1, Math.ceil(total / pageSize))
   if (pages <= 1) return null
   return (
-    <div className="mt-3 flex items-center justify-end gap-2 text-[13px] text-muted">
+    <div className="mt-3 flex items-center justify-end gap-2 text-[13px] text-kumo-subtle">
       <Button variant="secondary" size="sm" disabled={page <= 1} onClick={() => onChange(page - 1)}>
         ← prev
       </Button>

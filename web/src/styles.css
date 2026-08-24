@@ -1,36 +1,8 @@
+/* Tailwind first (consumer responsibility, per upstream kumo.css), then the
+   vendored kumo design system: tokens (@theme) + component styles. */
 @import "tailwindcss";
-@import "kumo-ui/styles.css";
-
-@theme {
-  --color-bg: #0b0e14;
-  --color-surface: #11151f;
-  --color-surface-2: #161b28;
-  --color-border: #232a3b;
-  --color-text: #e6e9f0;
-  --color-muted: #8b93a7;
-  --color-accent: #4c8dff;
-  --color-ok: #34d399;
-  --color-warn: #fbbf24;
-  --color-err: #f87171;
-  --color-info: #a78bfa;
-  --scrollbar-thumb: #2a3245;
-}
-
-/* light palette — same variable names, flipped values */
-[data-theme="light"] {
-  --color-bg: #f4f5f9;
-  --color-surface: #ffffff;
-  --color-surface-2: #eef0f6;
-  --color-border: #d9dde8;
-  --color-text: #1b2233;
-  --color-muted: #626a80;
-  --color-accent: #2f6fe0;
-  --color-ok: #0f9d6c;
-  --color-warn: #c07f00;
-  --color-err: #dc4b4b;
-  --color-info: #7c5cd6;
-  --scrollbar-thumb: #c3c9d8;
-}
+@import "./kumo/styles/theme-kumo.css";
+@import "./kumo/styles/kumo.css";
 
 html,
 body,
@@ -39,12 +11,11 @@ body,
 }
 
 body {
-  @apply bg-bg text-text antialiased;
+  @apply bg-kumo-base text-kumo-default antialiased;
   font-size: 14px;
 }
 
-/* thin scrollbars, theme-aware */
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-thumb) transparent;
+  scrollbar-color: var(--color-kumo-line) transparent;
 }

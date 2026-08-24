@@ -7,6 +7,7 @@ import {
 } from "../api.ts"
 import { JsonBlock, StatusBadge, statusTone } from "../components/pieces.tsx"
 import { Badge, Button } from "../components/ui.tsx"
+import { Banner, Text, cn } from "../kumo"
 import { fmtTime } from "../format.ts"
 import { triggerRefresh } from "../shell.tsx"
 
@@ -80,9 +81,9 @@ export function WorkflowRunPage({
     }
   }
 
-  if (error) return <div className="text-[13px] text-err">{error}</div>
-  if (!data) return <div className="text-muted">loading…</div>
-  if (!run) return <div className="text-muted">run message not found</div>
+  if (error) return <span className="text-[13px] text-kumo-danger">{error}</span>
+  if (!data) return <span className="text-[13px] text-kumo-subtle">loading…</span>
+  if (!run) return <span className="text-[13px] text-kumo-subtle">run message not found</span>
 
   const canRetry = run.status === "done"
   const canCancel = run.status === "pending" || run.status === "inflight" || run.status === "scheduled"
@@ -93,13 +94,9 @@ export function WorkflowRunPage({
         <OutcomeBanner outcome={result.outcome} exit={result.exit} />
       )}
 
-      {actionError && (
-        <div className="rounded-md border border-err/30 bg-err/10 px-3 py-2 text-[12px] text-err">
-          {actionError}
-        </div>
-      )}
+      {actionError && <Banner variant="error">{actionError}</Banner>}
 
-      <section className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg border border-border bg-surface-2/40 p-3">
+      <section className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg border border-kumo-line bg-kumo-recessed p-3">
         <Field label="Execution">
           <span className="font-mono text-xs">{executionId}</span>
         </Field>
@@ -108,7 +105,7 @@ export function WorkflowRunPage({
         </Field>
         <Field label="Started">{fmtTime(run.createdAt)}</Field>
         <Field label="Run message">
-          <span className="font-mono text-xs text-muted">{run.id}</span>
+          <span className="font-mono text-xs text-kumo-subtle">{run.id}</span>
         </Field>
       </section>
 
@@ -124,33 +121,34 @@ export function WorkflowRunPage({
               ✕ cancel run
             </Button>
           )}
-          <span className="text-[11px] text-muted">
+          <span className="text-[11px] text-kumo-subtle">
             writes go through the cluster's own storage semantics
           </span>
         </section>
       )}
 
       <section>
-        <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted">
+        <h3 className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-kumo-subtle">
           Run input
         </h3>
         <JsonBlock value={run.payload} />
       </section>
 
       <section>
-        <h3 className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-muted">
+        <h3 className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-kumo-subtle">
           Activity timeline ({data.activities.length})
         </h3>
         {data.activities.length === 0 ? (
-          <div className="text-muted">no activities recorded</div>
+          <span className="text-kumo-subtle">no activities recorded</span>
         ) : (
-          <ol className="relative space-y-3 border-l border-border pl-4">
+          <ol className="relative space-y-3 border-l border-kumo-line pl-4">
             {(data.activities as ActivityRow[]).map((a) => (
               <li key={a.id} className="relative">
                 <span
-                  className={`absolute -left-[21px] top-1 h-2.5 w-2.5 rounded-full ${
-                    a.failed ? "bg-err" : a.status === "done" ? "bg-ok" : "bg-warn"
-                  }`}
+                  className={cn(
+                    "absolute -left-[21px] top-1 h-2.5 w-2.5 rounded-full",
+                    a.failed ? "bg-kumo-danger" : a.status === "done" ? "bg-kumo-success" : "bg-kumo-warning"
+                  )}
                 />
                 <div className="flex items-center justify-between gap-2">
                   <code className="truncate text-[12px]">
@@ -165,7 +163,7 @@ export function WorkflowRunPage({
                     {a.failed ? "failed" : a.status}
                   </Badge>
                 </div>
-                <div className="mt-0.5 text-[11px] text-muted">{fmtTime(a.createdAt)}</div>
+                <div className="mt-0.5 text-[11px] text-kumo-subtle">{fmtTime(a.createdAt)}</div>
                 {a.payload !== null && (
                   <div className="mt-1">
                     <JsonBlock value={a.payload} max={140} />
@@ -184,10 +182,10 @@ function OutcomeBanner({ outcome, exit }: { outcome: "Success" | "Failure"; exit
   const ok = outcome === "Success"
   return (
     <div
-      className={
-        "rounded-md border px-3 py-2 " +
-        (ok ? "border-ok/40 bg-ok/10 text-ok" : "border-err/40 bg-err/10 text-err")
-      }
+      className={cn(
+        "rounded-md border px-3 py-2",
+        ok ? "border-kumo-success/40 bg-kumo-success-tint" : "border-kumo-danger/40 bg-kumo-danger-tint"
+      )}
     >
       <div className="flex items-center justify-between gap-2">
         <strong className="text-[13px]">
@@ -207,7 +205,7 @@ function OutcomeBanner({ outcome, exit }: { outcome: "Success" | "Failure"; exit
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">{label}</span>
+      <span className="text-[11px] font-semibold uppercase tracking-wide text-kumo-subtle">{label}</span>
       <span className="truncate">{children}</span>
     </div>
   )

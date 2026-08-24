@@ -1,6 +1,6 @@
 import * as React from "react"
 import { api, type Shard } from "../api.ts"
-import { Badge, Select } from "../components/ui.tsx"
+import { Badge, Select, Table, TBody, TD, TH, THead, TR } from "../components/ui.tsx"
 import { ErrorNote, PageHeader, usePolling } from "../shell.tsx"
 
 export function ShardsPage() {
@@ -12,7 +12,6 @@ export function ShardsPage() {
   const filtered = shards.filter((s) =>
     filter === "all" ? true : filter === "assigned" ? s.address !== null : s.address === null
   )
-  // group consecutive shard ids per runner for a compact heat strip
   const assignedCount = shards.filter((s) => s.address !== null).length
 
   return (
@@ -25,8 +24,8 @@ export function ShardsPage() {
         </Select>
       </PageHeader>
       <ErrorNote error={error} />
-      <div className="mb-4 rounded-lg border border-border bg-surface p-4">
-        <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted">
+      <div className="mb-4 rounded-lg border border-kumo-line bg-kumo-base p-4">
+        <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-kumo-subtle">
           Distribution map — one cell per shard
         </div>
         <div
@@ -37,47 +36,53 @@ export function ShardsPage() {
             <div
               key={s.shardId}
               title={`shard ${s.shardId} → ${s.address ?? "UNASSIGNED"}`}
+              aria-label={`shard ${s.shardId} ${s.address ? `assigned to ${s.address}` : "unassigned"}`}
               className={
                 "aspect-square cursor-help rounded-[3px] " +
-                (s.address ? "bg-accent/80" : "border border-warn/50 bg-warn/10")
+                (s.address
+                  ? "bg-(--color-kumo-brand)/80"
+                  : "border border-kumo-warning/50 bg-kumo-warning/10")
               }
             />
           ))}
         </div>
-        <div className="mt-3 flex items-center gap-4 text-[12px] text-muted">
+        <div className="mt-3 flex items-center gap-4 text-[12px] text-kumo-subtle">
           <span className="flex items-center gap-1.5">
-            <span className="h-2.5 w-2.5 rounded-sm bg-accent/80" /> assigned
+            <span className="h-2.5 w-2.5 rounded-sm bg-(--color-kumo-brand)/80" /> assigned
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="h-2.5 w-2.5 rounded-sm border border-warn/50 bg-warn/10" /> unassigned
-            (rebalancing)
+            <span className="h-2.5 w-2.5 rounded-sm border border-kumo-warning/50 bg-kumo-warning/10" />{" "}
+            unassigned (rebalancing)
           </span>
         </div>
       </div>
 
-      <div className="max-h-[420px] overflow-y-auto rounded-lg border border-border bg-surface">
-        <table className="w-full text-[13px]">
-          <thead className="sticky top-0 bg-surface">
-            <tr className="[&>th]:px-3 [&>th]:py-2 [&>th]:text-left [&>th]:text-[11px] [&>th]:font-semibold [&>th]:uppercase [&>th]:tracking-wide [&>th]:text-muted">
-              <th>Shard</th>
-              <th>Assigned runner</th>
-            </tr>
-          </thead>
-          <tbody>
+      <div className="overflow-hidden rounded-lg border border-kumo-line bg-kumo-base">
+        <Table>
+          <THead>
+            <TR>
+              <TH>Shard</TH>
+              <TH>Assigned runner</TH>
+            </TR>
+          </THead>
+          <TBody>
             {filtered.map((s) => (
-              <tr key={s.shardId} className="border-t border-border/60 hover:bg-surface-2/60">
-                <td className="px-3 py-1.5 tabular-nums">{s.shardId}</td>
-                <td className="px-3 py-1.5">
+              <TR key={s.shardId}>
+                <TD className="tabular-nums">{s.shardId}</TD>
+                <TD>
                   {s.address ? (
                     <span>{s.address}</span>
                   ) : (
                     <Badge tone="warn">unassigned</Badge>
                   )}
-                </td>
-              </tr>
+                </TD>
+              </TR>
             ))}
-          </tbody>
-        </table>
+          </TBody>
+        </Table>
+        {filtered.length === 0 && (
+          <div className="py-8 text-center text-[13px] text-kumo-subtle">no shards match</div>
+        )}
       </div>
     </div>
   )

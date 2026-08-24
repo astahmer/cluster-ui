@@ -1,6 +1,9 @@
 import * as React from "react"
+import { SquaresFour, Cpu, GridFour, Cube, ClockCounterClockwise, FlowArrow, ListDashes } from "@phosphor-icons/react"
 import { api } from "./api.ts"
-import { usePaused, setPaused as setGlobalPaused } from "./live.ts"
+import * as live from "./live.ts"
+import { inputVariants } from "./kumo"
+import { Badge } from "./components/ui.tsx"
 import { cn } from "./components/ui.tsx"
 
 /* ------------------------------ hash routing ------------------------------ */
@@ -31,11 +34,6 @@ export function useRoute(): Route {
   return route
 }
 
-/** @deprecated use `useRoute` — returns the raw hash path */
-export function useHashRoute(): string {
-  return useRoute().path
-}
-
 export function navigate(path: string) {
   window.location.hash = path
 }
@@ -51,12 +49,7 @@ export function Link({ to, className, ...props }: LinkProps) {
 /* ------------------------------- live refresh ----------------------------- */
 
 export { useLive, isPaused, triggerRefresh } from "./live.ts"
-import * as live from "./live.ts"
 
-/**
- * @deprecated kept as a bridge until all pages migrate — identical ergonomics,
- * now SSE-driven via `useLive` instead of blind 4s interval polling.
- */
 export const usePolling = live.useLive
 
 /**
@@ -74,13 +67,16 @@ export function useEscToClose(handler: () => void) {
 }
 
 /* --------------------------------- theming -------------------------------- */
-
+// kumo flips light/dark via `data-mode` on :root; `data-theme="kumo"` scopes tokens.
 const THEME_KEY = "cluster_ui_theme"
 
-function applyTheme(theme: string) {
-  document.documentElement.dataset.theme = theme
+function applyTheme(mode: string) {
+  document.documentElement.dataset.mode = mode
+  if (!document.documentElement.dataset.theme) {
+    document.documentElement.dataset.theme = "kumo"
+  }
   try {
-    localStorage.setItem(THEME_KEY, theme)
+    localStorage.setItem(THEME_KEY, mode)
   } catch {}
 }
 
@@ -89,22 +85,27 @@ function initialTheme(): string {
   try {
     stored = localStorage.getItem(THEME_KEY)
   } catch {}
-  return stored ?? "dark"
+  if (stored !== null) return stored
+  return window.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark"
 }
 
 /* --------------------------------- layout --------------------------------- */
 
 const NAV = [
-  { to: "/overview", label: "Overview", icon: "◧" },
-  { to: "/runners", label: "Runners", icon: "▣" },
-  { to: "/shards", label: "Shards", icon: "▦" },
-  { to: "/entities", label: "Entities", icon: "◫" },
-  { to: "/crons", label: "Crons", icon: "◷" },
-  { to: "/workflows", label: "Workflows", icon: "⌘" },
-  { to: "/messages", label: "Messages", icon: "≡" }
+  { to: "/overview", label: "Overview", icon: SquaresFour },
+  { to: "/runners", label: "Runners", icon: Cpu },
+  { to: "/shards", label: "Shards", icon: GridFour },
+  { to: "/entities", label: "Entities", icon: Cube },
+  { to: "/workflows", label: "Workflows", icon: FlowArrow },
+  { to: "/crons", label: "Crons", icon: ClockCounterClockwise },
+  { to: "/messages", label: "Messages", icon: ListDashes }
 ]
 
+const NAV_GROUP_CLUSTER = new Set(["/overview", "/runners", "/shards"])
+const NAV_GROUP_WORK = new Set(["/entities", "/workflows", "/crons", "/messages"])
+
 function TopBar({ base }: { base: string }) {
+  void base
   const [paused, togglePausedState] = live.usePaused()
   const [clusters, setClusters] = React.useState<string[]>([])
   const [cluster, setClusterState] = React.useState<string | null>(null)
@@ -133,16 +134,16 @@ function TopBar({ base }: { base: string }) {
 
   const pickTheme = () => {
     const next =
-      (document.documentElement.dataset.theme ?? initialTheme()) === "dark" ? "light" : "dark"
+      (document.documentElement.dataset.mode ?? initialTheme()) === "dark" ? "light" : "dark"
     applyTheme(next)
   }
 
   return (
-    <div className="flex h-11 shrink-0 items-center justify-end gap-2 border-b border-border bg-surface px-4">
+    <div className="flex h-11 shrink-0 items-center justify-end gap-2 border-b border-kumo-line bg-kumo-base px-4">
       {clusters.length > 1 && (
         <select
           aria-label="cluster"
-          className="h-7 rounded-md border border-border bg-bg px-2 text-[12px] text-text focus:border-accent focus:outline-none cursor-pointer"
+          className={cn(inputVariants({ size: "xs" }), "h-7 cursor-pointer")}
           value={cluster ?? clusters[0]}
           onChange={(e) => {
             localStorage.setItem("cluster_ui_cluster", e.target.value)
@@ -160,24 +161,19 @@ function TopBar({ base }: { base: string }) {
 
       <button
         type="button"
-        onClick={() => setGlobalPaused(!paused)}
+        onClick={() => togglePausedState(!paused)}
         title={paused ? "resume auto-refresh" : "pause auto-refresh"}
-        className={cn(
-          "inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-[11px] font-semibold uppercase tracking-wide cursor-pointer transition-colors",
-          paused
-            ? "border-warn/40 bg-warn/10 text-warn"
-            : "border-ok/40 bg-ok/10 text-ok"
-        )}
+        aria-label={paused ? "resume auto-refresh" : "pause auto-refresh"}
       >
-        <span className={cn("h-1.5 w-1.5 rounded-full", paused ? "bg-warn" : "bg-ok animate-pulse")} />
-        {paused ? "paused" : "live"}
+        <Badge tone={paused ? "warn" : "ok"}>{paused ? "paused" : "live"}</Badge>
       </button>
 
       <button
         type="button"
         onClick={pickTheme}
         title="toggle light/dark"
-        className="grid h-7 w-7 place-items-center rounded-md text-muted hover:bg-surface-2 hover:text-text cursor-pointer"
+        aria-label="toggle light/dark theme"
+        className="grid h-7 w-7 place-items-center rounded-md text-kumo-subtle hover:bg-kumo-tint hover:text-kumo-default cursor-pointer"
       >
         ◐
       </button>
@@ -226,47 +222,83 @@ export function Shell({ route, children }: { route: string; children: React.Reac
   }, [])
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex min-h-0 flex-1">
-        <aside className="flex w-52 shrink-0 flex-col border-r border-border bg-surface">
-          <div className="flex items-center gap-2 px-4 py-4">
-            <span className="grid h-7 w-7 place-items-center rounded-md bg-accent text-sm font-bold text-white">
-              c
-            </span>
-            <div>
-              <div className="text-sm font-semibold leading-4">cluster-ui</div>
-              <div className="text-[11px] text-muted">effect v4 dashboard</div>
-            </div>
+    <ShellLayout base={base}>{children}</ShellLayout>
+  )
+}
+
+function ShellLayout({ base, children }: { base: string; children: React.ReactNode }) {
+  return (
+    <div className="flex h-full">
+      <aside className="flex w-52 shrink-0 flex-col border-r border-kumo-line bg-kumo-elevated">
+        <div className="flex items-center gap-2 px-4 py-4">
+          <span className="grid h-7 w-7 place-items-center rounded-md bg-kumo-brand text-sm font-bold !text-white">
+            c
+          </span>
+          <div>
+            <div className="text-sm font-semibold leading-4 text-kumo-default">cluster-ui</div>
+            <div className="text-[11px] text-kumo-subtle">effect v4 dashboard</div>
           </div>
-          <nav className="mt-2 flex flex-1 flex-col gap-0.5 px-2">
-            {NAV.map((item, i) => (
-              <Link
-                key={item.to}
-                to={item.to}
-                className={cn(
-                  "group flex items-center gap-2.5 rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors",
-                  base === item.to
-                    ? "bg-accent/12 text-accent"
-                    : "text-muted hover:bg-surface-2 hover:text-text"
-                )}
-              >
-                <span className="w-4 text-center opacity-80">{item.icon}</span>
-                <span className="flex-1">{item.label}</span>
-                <kbd className="hidden text-[10px] text-muted/60 group-hover:inline">{i + 1}</kbd>
-              </Link>
-            ))}
-          </nav>
-          <div className="border-t border-border px-4 py-3 text-[11px] leading-4 text-muted">
-            reads the cluster's SQL storage
-            <br />
-            <span className="text-muted/70">1–{NAV.length} switch · / search · esc close</span>
-          </div>
-        </aside>
-        <div className="flex min-w-0 flex-1 flex-col">
-          <TopBar base={base} />
-          <main className="min-h-0 flex-1 overflow-y-auto p-5">{children}</main>
         </div>
+        <nav className="mt-2 flex flex-1 flex-col gap-4 px-2">
+          <NavGroup label="Cluster" base={base} items={NAV.filter((n) => NAV_GROUP_CLUSTER.has(n.to))} />
+          <NavGroup label="Work" base={base} items={NAV.filter((n) => NAV_GROUP_WORK.has(n.to))} />
+        </nav>
+        <div className="border-t border-kumo-line px-4 py-3 text-[11px] leading-4 text-kumo-subtle">
+          reads the cluster's SQL storage
+          <br />
+          <span className="text-kumo-inactive">1–{NAV.length} switch · / search · esc close</span>
+        </div>
+      </aside>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <TopBar base={base} />
+        <main className="min-h-0 flex-1 overflow-y-auto p-5">{children}</main>
       </div>
+    </div>
+  )
+}
+
+function NavGroup({
+  label,
+  base,
+  items
+}: {
+  label: string
+  base: string
+  items: typeof NAV
+}) {
+  return (
+    <div>
+      <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-kumo-inactive">
+        {label}
+      </div>
+      <nav className="flex flex-col gap-0.5">
+        {items.map((item) => {
+          const Icon = item.icon
+          const active = base === item.to
+          return (
+            <Link
+              key={item.to}
+              to={item.to}
+              aria-current={active ? "page" : undefined}
+              className={cn(
+                "group flex items-center gap-2.5 rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors cursor-pointer",
+                active
+                  ? "bg-kumo-tint text-kumo-default"
+                  : "text-kumo-subtle hover:bg-kumo-tint hover:text-kumo-default"
+              )}
+            >
+              <Icon
+                weight={active ? "fill" : "regular"}
+                className={cn("h-4 w-4 shrink-0", active ? "text-kumo-brand" : "opacity-80")}
+              />
+              <span className="flex-1">{item.label}</span>
+              <kbd className="hidden text-[10px] text-kumo-inactive group-hover:inline">
+                {NAV.findIndex((n) => n.to === item.to) + 1}
+              </kbd>
+            </Link>
+          )
+        })}
+      </nav>
     </div>
   )
 }
@@ -285,8 +317,8 @@ export function PageHeader({
   return (
     <div className="mb-4 flex items-end justify-between gap-4">
       <div>
-        <h1 className="text-lg font-semibold">{title}</h1>
-        {subtitle && <p className="mt-0.5 text-[13px] text-muted">{subtitle}</p>}
+        <h1 className="text-lg font-semibold text-kumo-default">{title}</h1>
+        {subtitle && <p className="mt-0.5 text-[13px] text-kumo-subtle">{subtitle}</p>}
       </div>
       <div className="flex items-center gap-2">{children}</div>
     </div>
@@ -296,7 +328,7 @@ export function PageHeader({
 export function ErrorNote({ error }: { error: string | null }) {
   if (!error) return null
   return (
-    <div className="rounded-md border border-err/30 bg-err/10 px-3 py-2 text-[13px] text-err">
+    <div className="mb-3 rounded-md border border-kumo-danger/30 bg-kumo-danger-tint px-3 py-2 text-[13px] text-kumo-danger">
       {error}
     </div>
   )

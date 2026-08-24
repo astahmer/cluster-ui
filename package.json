@@ -14,6 +14,7 @@
     "smoke": "node web/smoke.mjs"
   },
   "dependencies": {
+    "@base-ui/react": "^1.7.0",
     "@effect/platform": "link:../effect/packages/platform",
     "@effect/platform-node": "link:../effect/packages/platform-node",
     "@effect/platform-node-shared": "link:../effect/packages/platform-node-shared",
@@ -21,9 +22,11 @@
     "@effect/sql-sqlite-node": "link:../effect/packages/sql-sqlite-node",
     "@opentelemetry/semantic-conventions": "^1.33.0",
     "@parcel/watcher": "^2.5.1",
+    "@phosphor-icons/react": "^2.1.10",
     "better-sqlite3": "^12.2.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "cnfast": "^0.0.8",
     "effect": "link:../effect/packages/effect",
     "find-my-way-ts": "^0.1.5",
     "kumo-ui": "^0.2.1",

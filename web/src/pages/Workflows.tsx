@@ -4,6 +4,7 @@ import { ActivityDot } from "../components/pieces.tsx"
 import { Badge, Card, CardContent, Table, TBody, TD, TH, THead, TR } from "../components/ui.tsx"
 import { ErrorNote, PageHeader, useLive } from "../shell.tsx"
 import { StatusBadge } from "../components/pieces.tsx"
+import { Empty } from "../kumo"
 import { WorkflowRunPage } from "./WorkflowRunDetail.tsx"
 
 /** server rows also carry `failed` (Failure WithExit reply on the run message) */
@@ -26,15 +27,17 @@ export function WorkflowListPage() {
       <ErrorNote error={error} />
       {rows.length === 0 ? (
         <Card>
-          <CardContent className="py-10 text-center text-muted">
-            No workflow runs recorded. Workflows appear here once a ClusterWorkflowEngine executes
-            them — look for entity types named <code>Workflow/&lt;name&gt;</code>.
+          <CardContent className="py-8">
+            <Empty
+              title="No workflows yet"
+              description="Workflows appear here once a ClusterWorkflowEngine executes them — look for entity types named Workflow/<name>."
+            />
           </CardContent>
         </Card>
       ) : (
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
           {rows.map((w) => (
-            <Card key={w.name} className="transition-colors hover:border-accent/50">
+            <Card key={w.name} className="transition-colors hover:border-kumo-brand/60">
               <a href={`#/workflows/${encodeURIComponent(w.name)}`} className="block">
                 <div className="flex items-center justify-between px-4 pt-3">
                   <span className="font-semibold">{w.name}</span>
@@ -46,7 +49,7 @@ export function WorkflowListPage() {
                   {(w.failedRuns ?? 0) > 0 && (
                     <Badge tone="err">{w.failedRuns} failed</Badge>
                   )}
-                  <span className="ml-auto text-muted tabular-nums">
+                  <span className="ml-auto text-kumo-subtle tabular-nums">
                     {w.runs} runs
                     {totalFailed > 0 && (w.failedRuns ?? 0) > 0 ?
                       ` · ${Math.round(((w.failedRuns ?? 0) / w.runs) * 100)}% fail rate` :
@@ -72,12 +75,12 @@ export function WorkflowRunsPage({ name }: { name: string }) {
   return (
     <div>
       <PageHeader title={name} subtitle="workflow executions">
-        <a href="#/workflows" className="text-[13px] text-muted hover:text-text">
+        <a href="#/workflows" className="text-[13px] text-kumo-subtle hover:text-kumo-default">
           ← all workflows
         </a>
       </PageHeader>
       <ErrorNote error={error} />
-      <div className="rounded-lg border border-border bg-surface">
+      <div className="rounded-lg border border-kumo-line bg-kumo-base">
         <Table>
           <THead>
             <TR>
@@ -93,13 +96,13 @@ export function WorkflowRunsPage({ name }: { name: string }) {
                 key={r.executionId}
                 className={
                   "cursor-pointer" +
-                  (r.failed ? " border-l-2 border-l-err hover:bg-err/5" : "")
+                  (r.failed ? " border-l-2 border-l-kumo-danger hover:bg-kumo-danger/5" : "")
                 }
                 onClick={() => setOpenExecution(r.executionId)}
               >
                 <TD
                   className={
-                    "font-mono text-xs " + (r.failed ? "text-err" : r.failed === false ? "" : "")
+                    "font-mono text-xs " + (r.failed ? "text-kumo-danger" : "")
                   }
                 >
                   {r.executionId}
@@ -112,16 +115,16 @@ export function WorkflowRunsPage({ name }: { name: string }) {
                 <TD>
                   <StatusBadge status={r.status as MessageStatus} />
                 </TD>
-                <TD className="tabular-nums text-muted">{r.activityCount}</TD>
-                <TD className="whitespace-nowrap text-muted">
+                <TD className="tabular-nums text-kumo-subtle">{r.activityCount}</TD>
+                <TD className="whitespace-nowrap text-kumo-subtle">
                   {new Date(r.createdAt).toLocaleString()}
                 </TD>
               </TR>
             ))}
             {!error && runs !== null && runs.length === 0 && (
               <TR>
-                <TD colSpan={4} className="py-8 text-center text-muted">
-                  no executions
+                <TD colSpan={4} className="py-6">
+                  <Empty title="No executions" />
                 </TD>
               </TR>
             )}
@@ -160,15 +163,15 @@ function WorkflowRunDetailModal({
   return (
     <div className="fixed inset-0 z-40 flex justify-end bg-black/40" onClick={onClose}>
       <div
-        className="flex h-full w-full max-w-xl flex-col overflow-y-auto border-l border-border bg-surface p-4 shadow-xl"
+        className="flex h-full w-full max-w-xl flex-col overflow-y-auto border-l border-kumo-line bg-kumo-base p-4 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-sm font-semibold">
-            {name} <span className="font-mono text-xs text-muted">/ {executionId}</span>
+            {name} <span className="font-mono text-xs text-kumo-subtle">/ {executionId}</span>
           </h2>
           <button
-            className="rounded px-2 py-1 text-[12px] text-muted hover:bg-surface-2 hover:text-text cursor-pointer"
+            className="cursor-pointer rounded px-2 py-1 text-[12px] text-kumo-subtle hover:bg-kumo-tint hover:text-kumo-default"
             onClick={onClose}
           >
             ✕ close

@@ -5,6 +5,7 @@ import { Sparkline } from "../components/sparkline.tsx"
 import { ActivityDot, StatCard } from "../components/pieces.tsx"
 import { Badge } from "../components/ui.tsx"
 import { ErrorNote, PageHeader, useLive } from "../shell.tsx"
+import { Banner } from "../kumo"
 
 export function OverviewPage() {
   const [data, setData] = React.useState<Overview | null>(null)
@@ -35,15 +36,16 @@ export function OverviewPage() {
       <ErrorNote error={overviewLive.error} />
 
       {unassigned > 0 && (
-        <div className="mb-3 flex items-center justify-between rounded-md border border-err/40 bg-err/10 px-3 py-2 text-[13px] text-err">
-          <span>
-            <strong>{unassigned}</strong> shard{unassigned === 1 ? "" : "s"} unassigned — the
-            shard manager is rebalancing or a runner is down.
-          </span>
+        <Banner
+          variant="error"
+          title={`${unassigned} shard${unassigned === 1 ? "" : "s"} unassigned`}
+          description="The shard manager is rebalancing or a runner is down."
+          className="mb-3"
+        >
           <a href="#/shards" className="shrink-0 underline underline-offset-2 hover:opacity-80">
             view shards →
           </a>
-        </div>
+        </Banner>
       )}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
@@ -54,6 +56,7 @@ export function OverviewPage() {
           label="Failed"
           value={m.failed}
           sub="exited with Failure"
+          tone={m.failed > 0 ? "err" : undefined}
         />
         <StatCard label="Done" value={m.done} sub="processed messages" />
       </div>
@@ -61,7 +64,7 @@ export function OverviewPage() {
       <Card className="mt-3">
         <CardHeader className="flex-row items-center justify-between">
           <CardTitle>Activity — last hour</CardTitle>
-          <span className="text-[11px] text-muted">{history.length} samples</span>
+          <span className="text-[11px] text-kumo-subtle">{history.length} samples</span>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -85,11 +88,11 @@ export function OverviewPage() {
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex items-baseline gap-2">
-              <span className="text-xl font-semibold tabular-nums">{shards.assigned}</span>
-              <span className="text-muted">/ {shards.total} shards assigned</span>
+              <span className="text-xl font-semibold tabular-nums text-kumo-default">{shards.assigned}</span>
+              <span className="text-kumo-subtle">/ {shards.total} shards assigned</span>
             </div>
             <ShardBar assigned={shards.assigned} total={shards.total} />
-            <div className="text-[12px] text-muted">
+            <div className="text-[12px] text-kumo-subtle">
               {data!.runners.total} runner{data!.runners.total === 1 ? "" : "s"} registered
             </div>
           </CardContent>
@@ -101,8 +104,8 @@ export function OverviewPage() {
           <CardContent className="space-y-1.5">
             {data!.topEntities.map((e) => (
               <div key={e.entityType} className="flex items-center justify-between text-[13px]">
-                <code className="truncate text-accent/90">{e.entityType}</code>
-                <span className="flex items-center gap-2 tabular-nums text-muted">
+                <code className="truncate text-kumo-brand/90">{e.entityType}</code>
+                <span className="flex items-center gap-2 tabular-nums text-kumo-subtle">
                   {e.active > 0 && <Badge tone="warn">{e.active} active</Badge>}
                   {e.total} msgs
                 </span>
@@ -119,17 +122,17 @@ export function OverviewPage() {
           </CardHeader>
           <CardContent className="space-y-1.5">
             {data!.topWorkflows.length === 0 && (
-              <div className="text-[13px] text-muted">no workflow runs recorded</div>
+              <div className="text-[13px] text-kumo-subtle">no workflow runs recorded</div>
             )}
             {data!.topWorkflows.map((w) => (
               <div key={w.name} className="flex items-center justify-between text-[13px]">
                 <a
                   href={`#/workflows/${encodeURIComponent(w.name)}`}
-                  className="truncate font-medium text-text hover:text-accent"
+                  className="truncate font-medium text-kumo-default hover:text-kumo-link"
                 >
                   {w.name}
                 </a>
-                <span className="tabular-nums text-muted">{w.runs} runs</span>
+                <span className="tabular-nums text-kumo-subtle">{w.runs} runs</span>
               </div>
             ))}
           </CardContent>
@@ -140,7 +143,7 @@ export function OverviewPage() {
           </CardHeader>
           <CardContent>
             <ActivityDot at={data!.serverTime} />
-            <p className="mt-2 text-[12px] leading-5 text-muted">
+            <p className="mt-2 text-[12px] leading-5 text-kumo-subtle">
               Message ids are snowflakes — their embedded timestamp powers the “last activity”
               views. Status windows mirror the cluster: a message is in-flight for 5 minutes after
               being read.
@@ -166,7 +169,7 @@ function MetricSeries({
   return (
     <div className="min-w-0">
       <div className="mb-1 flex items-baseline justify-between gap-2">
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-kumo-subtle">
           {label}
         </span>
       </div>
@@ -181,9 +184,9 @@ function MetricSeries({
 
 function ShardBar({ assigned, total }: { assigned: number; total: number }) {
   return (
-    <div className="flex h-3 w-full overflow-hidden rounded-full border border-border bg-bg">
+    <div className="h-3 w-full overflow-hidden rounded-full border border-kumo-line bg-kumo-canvas">
       <div
-        className="h-full bg-accent transition-all"
+        className="h-full bg-kumo-brand transition-all"
         style={{ width: `${(assigned / total) * 100}%` }}
       />
     </div>

@@ -1,7 +1,7 @@
 import * as React from "react"
 import { api, type MessageDetail, type MessageStatus } from "../api.ts"
 import { relTime } from "../format.ts"
-import { Badge, Button, Card, CardContent, CardHeader, CardTitle, type StatusTone } from "./ui.tsx"
+import { Badge, Button, Card, CardContent, CardHeader, CardTitle, cn, type StatusTone } from "./ui.tsx"
 
 export const statusTone: Record<MessageStatus, StatusTone> = {
   pending: "warn",
@@ -17,11 +17,11 @@ export function StatusBadge({ status }: { status: MessageStatus }) {
 export function JsonBlock({ value, max = 400 }: { value: unknown; max?: number }) {
   const [open, setOpen] = React.useState(false)
   const text = React.useMemo(() => JSON.stringify(value, null, 2) ?? "—", [value])
-  if (value === null || value === undefined) return <span className="text-muted">—</span>
+  if (value === null || value === undefined) return <span className="text-kumo-subtle">—</span>
   if (!open && text.length > max) {
     return (
       <div className="flex items-center gap-2">
-        <code className="truncate rounded bg-bg px-1.5 py-0.5 text-xs">{text.slice(0, max)}…</code>
+        <code className="truncate rounded bg-kumo-canvas px-1.5 py-0.5 text-xs">{text.slice(0, max)}…</code>
         <Button variant="ghost" size="sm" onClick={() => setOpen(true)}>
           more
         </Button>
@@ -30,7 +30,7 @@ export function JsonBlock({ value, max = 400 }: { value: unknown; max?: number }
   }
   return (
     <div className="flex flex-col items-start gap-1">
-      <pre className="max-h-64 max-w-full overflow-auto rounded-md border border-border bg-bg p-2.5 text-xs leading-5">
+      <pre className="max-h-64 max-w-full overflow-auto rounded-md border border-kumo-line bg-kumo-base p-2.5 text-xs leading-5">
         {text}
       </pre>
       {text.length > max && (
@@ -45,20 +45,24 @@ export function JsonBlock({ value, max = 400 }: { value: unknown; max?: number }
 export function StatCard({
   label,
   value,
-  sub
+  sub,
+  tone
 }: {
   label: string
   value: React.ReactNode
   sub?: React.ReactNode
+  tone?: "err" | undefined
 }) {
   return (
-    <Card>
+    <Card className={tone === "err" ? "border-kumo-danger/40" : undefined}>
       <CardHeader className="pb-1">
         <CardTitle>{label}</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="text-2xl font-semibold tabular-nums">{value}</div>
-        {sub && <div className="mt-0.5 text-[12px] text-muted">{sub}</div>}
+        <div className={cn("text-2xl font-semibold tabular-nums", tone === "err" && "text-kumo-danger")}>
+          {value}
+        </div>
+        {sub && <div className="mt-0.5 text-[12px] text-kumo-subtle">{sub}</div>}
       </CardContent>
     </Card>
   )
@@ -80,7 +84,7 @@ export function DetailPanel({
   return (
     <div className="fixed inset-0 z-40 flex justify-end bg-black/40" onClick={onClose}>
       <div
-        className="flex h-full w-full max-w-xl flex-col overflow-y-auto border-l border-border bg-surface p-4 shadow-xl"
+        className="flex h-full w-full max-w-xl flex-col overflow-y-auto border-l border-kumo-line bg-kumo-base p-4 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-3 flex items-center justify-between">
@@ -113,8 +117,8 @@ export function useMessageDetail(id: string | null) {
 
 export function ActivityDot({ at }: { at: number | null }) {
   return (
-    <span className="inline-flex items-center gap-1.5 text-muted" title={at ? new Date(at).toLocaleString() : ""}>
-      <span className="h-1.5 w-1.5 rounded-full bg-accent/70" />
+    <span className="inline-flex items-center gap-1.5 text-kumo-subtle" title={at ? new Date(at).toLocaleString() : ""}>
+      <span className="h-1.5 w-1.5 rounded-full bg-kumo-brand/70" />
       {relTime(at)}
     </span>
   )
