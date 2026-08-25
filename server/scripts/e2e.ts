@@ -10,6 +10,8 @@ import { createServer } from "node:http"
 import { spawn, type ChildProcess } from "node:child_process"
 import { resolve } from "node:path"
 import { api, clusterRepos } from "../src/api.ts"
+import { parseClusters } from "../src/config.ts"
+import { makeRedisRepo } from "../src/redis-repo.ts"
 import * as metrics from "../src/metrics.ts"
 
 const PORT = 8791
@@ -255,6 +257,32 @@ async function runChecks() {
   const noKeyOk = noKey.status === 401
   console.log(`${noKeyOk ? "✓" : "✗"} agent stream without key -> 401`)
   if (!noKeyOk) failures++
+
+  // ---- redis config parsing + unreachable-redis degradation ------------
+  const parsed = parseClusters("demo=redis://localhost:6399,default=./data/cluster.db:cluster")
+  const parseOk =
+    parsed.length === 2 &&
+    parsed[0].kind === "redis" &&
+    parsed[0].url === "redis://localhost:6399" &&
+    parsed[1].kind === "sqlite" &&
+    parsed[1].dbFile === "./data/cluster.db" &&
+    parsed[1].prefix === "cluster"
+  console.log(`${parseOk ? "✓" : "✗"} redis/sqlite cluster parsing`)
+  if (!parseOk) failures++
+
+  const deadRedisStarted = Date.now()
+  try {
+    const overview = await makeRedisRepo("redis://127.0.0.1:6399").overview()
+    const degradedOk = Date.now() - deadRedisStarted < 10_000
+    console.log(`${degradedOk ? "✓" : "✗"} unreachable redis degrades (no hang, ${Date.now() - deadRedisStarted}ms)`)
+    if (!degradedOk) failures++
+    void overview
+  } catch (e) {
+    const elapsed = Date.now() - deadRedisStarted
+    const clean = elapsed < 10_000
+    console.log(`${clean ? "✓" : "✗"} unreachable redis fails fast (${elapsed}ms: ${String(e).slice(0, 60)})`)
+    if (!clean) failures++
+  }
 
   // unknown cluster
   const badCluster = await fetch(`http://127.0.0.1:${PORT}/api/overview?cluster=nope`)

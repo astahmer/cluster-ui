@@ -16,8 +16,10 @@ export interface ClusterProfile {
  * Cluster registry: `CLUSTER_UI_CLUSTERS="name=path[:prefix],name2=path2[:prefix2]"`.
  * Falls back to a single cluster named "default" from CLUSTER_UI_DB/CLUSTER_UI_PREFIX.
  */
-export function parseClusters(): ReadonlyArray<ClusterProfile> {
-  const raw = process.env.CLUSTER_UI_CLUSTERS
+export function parseClusters(
+  rawInput = process.env.CLUSTER_UI_CLUSTERS
+): ReadonlyArray<ClusterProfile> {
+  const raw = rawInput
   if (!raw?.trim()) {
     const profile: ClusterProfile = {
       name: "default",
@@ -38,17 +40,21 @@ export function parseClusters(): ReadonlyArray<ClusterProfile> {
       const rest = eq === -1 ? "" : entry.slice(eq + 1).trim()
       const colon = rest.lastIndexOf(":")
       // "path:prefix" only counts as a split when the part after ":" has no path separator
+      // redis URLs carry a port — never treat "host:port" as path:prefix
+      const isRedis = rest.startsWith("redis://") || rest.startsWith("rediss://")
       const looksLikePrefix =
-        colon !== -1 && !rest.slice(colon + 1).includes("/") && rest.slice(colon + 1).length > 0
+        !isRedis &&
+        colon !== -1 &&
+        !rest.slice(colon + 1).includes("/") &&
+        rest.slice(colon + 1).length > 0
       const target = looksLikePrefix ? rest.slice(0, colon) : rest
       const prefix = looksLikePrefix ? rest.slice(colon + 1) : process.env.CLUSTER_UI_PREFIX ?? "cluster"
-      const isRedis = target.startsWith("redis://") || target.startsWith("rediss://")
       return {
         name: name || "default",
         kind: isRedis ? "redis" : "sqlite",
         dbFile: isRedis ? "" : target,
         url: isRedis ? target : "",
-        prefix
+        prefix: isRedis ? "cluster" : prefix
       }
     })
 }
