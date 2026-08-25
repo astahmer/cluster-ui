@@ -1,5 +1,5 @@
 import * as React from "react"
-import { SquaresFour, Cpu, GridFour, Cube, ClockCounterClockwise, FlowArrow, ListDashes, CirclesThree, List, Stack, Sparkle } from "@phosphor-icons/react"
+import { SquaresFour, Cpu, GridFour, Cube, ClockCounterClockwise, FlowArrow, ListDashes, CirclesThree, List, Stack, Sparkle, Plugs, MagnifyingGlass } from "@phosphor-icons/react"
 import { api } from "./api.ts"
 import * as live from "./live.ts"
 import { useFreshness } from "./freshness.ts"
@@ -103,7 +103,8 @@ const NAV = [
   { to: "/traces", label: "Traces", icon: Stack },
   { to: "/singletons", label: "Singletons", icon: CirclesThree },
   { to: "/messages", label: "Messages", icon: ListDashes },
-  { to: "/agent", label: "Agent", icon: Sparkle }
+  { to: "/agent", label: "AI Chat", icon: Sparkle },
+  { to: "/mcp", label: "MCP", icon: Plugs }
 ]
 
 const NAV_GROUP_CLUSTER = new Set(["/overview", "/runners", "/shards"])
@@ -123,7 +124,7 @@ function FreshnessIndicator() {
   )
 }
 
-function TopBar({ base, onMenu }: { base: string; onMenu: () => void }) {
+function TopBar({ base, onMenu, onOpenPalette }: { base: string; onMenu: () => void; onOpenPalette: () => void }) {
   void base
   const [paused, togglePausedState] = live.usePaused()
   const [clusters, setClusters] = React.useState<string[]>([])
@@ -169,6 +170,18 @@ function TopBar({ base, onMenu }: { base: string; onMenu: () => void }) {
       </button>
 
       <FreshnessIndicator />
+
+      {/* centered command-palette trigger */}
+      <button
+        type="button"
+        onClick={onOpenPalette}
+        aria-label="open command palette"
+        className="mx-auto hidden w-full max-w-md cursor-pointer items-center gap-2 rounded-md border border-kumo-line bg-kumo-canvas px-3 py-1 text-left text-[12px] text-kumo-inactive hover:border-kumo-brand/50 sm:flex"
+      >
+        <MagnifyingGlass className="h-3.5 w-3.5" />
+        <span className="flex-1">Search or jump to…</span>
+        <kbd className="rounded border border-kumo-line px-1 text-[10px]">⌘K</kbd>
+      </button>
 
       {clusters.length > 1 && (
         <select
@@ -232,14 +245,42 @@ export function Shell({ route, children }: { route: string; children: React.Reac
   }, [])
 
   const paletteItems = React.useMemo<PaletteItem[]>(
-    () =>
-      NAV.map((n) => ({
+    () => [
+      ...NAV.map((n) => ({
         key: n.to,
         label: `Go to ${n.label}`,
         keywords: n.to,
         hint: String(NAV.findIndex((x) => x.to === n.to) + 1),
         run: () => navigate(n.to)
       })),
+      {
+        key: "theme-light",
+        label: "Theme: light",
+        keywords: "appearance dark mode toggle",
+        run: () => applyTheme("light")
+      },
+      {
+        key: "theme-dark",
+        label: "Theme: dark",
+        keywords: "appearance light mode toggle",
+        run: () => applyTheme("dark")
+      },
+      {
+        key: "theme-toggle",
+        label: "Theme: toggle light/dark",
+        keywords: "appearance switch mode",
+        run: () =>
+          applyTheme(
+            (document.documentElement.dataset.mode ?? initialTheme()) === "dark" ? "light" : "dark"
+          )
+      },
+      {
+        key: "live-pause-toggle",
+        label: live.isPaused() ? "Live refresh: resume" : "Live refresh: pause",
+        keywords: "auto-refresh polling pause resume",
+        run: () => live.setPaused(!live.isPaused())
+      }
+    ],
     []
   )
   const dynamicItems = React.useCallback(
@@ -299,7 +340,13 @@ export function Shell({ route, children }: { route: string; children: React.Reac
 
   return (
     <>
-    <ShellLayout base={base} navOpen={navOpen} onMenu={() => setNavOpen(true)} onNavClose={() => setNavOpen(false)}>
+    <ShellLayout
+      base={base}
+      navOpen={navOpen}
+      onMenu={() => setNavOpen(true)}
+      onNavClose={() => setNavOpen(false)}
+      onOpenPalette={() => setPaletteOpen(true)}
+    >
       {children}
     </ShellLayout>
     <CommandPalette
@@ -317,12 +364,14 @@ function ShellLayout({
   navOpen,
   onMenu,
   onNavClose,
+  onOpenPalette,
   children
 }: {
   base: string
   navOpen: boolean
   onMenu: () => void
   onNavClose: () => void
+  onOpenPalette: () => void
   children: React.ReactNode
 }) {
   const [busDown, setBusDownState] = React.useState(live.isBusDown())
@@ -349,7 +398,7 @@ function ShellLayout({
       )}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <TopBar base={base} onMenu={onMenu} />
+        <TopBar base={base} onMenu={onMenu} onOpenPalette={onOpenPalette} />
         {busDown && (
           <div className="border-b border-kumo-warning/30 bg-kumo-warning-tint px-4 py-1.5 text-[12px] text-kumo-warning">
             Live updates unavailable — retrying…

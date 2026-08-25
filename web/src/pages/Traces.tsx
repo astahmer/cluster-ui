@@ -86,7 +86,7 @@ export function TraceDetailPage({ traceId }: { traceId: string }) {
   const { refresh } = useLive(async () => {
     try {
       const res = await api.trace(traceId)
-      setRows(res)
+      setRows(res.rows)
       setError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))

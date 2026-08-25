@@ -244,6 +244,18 @@ function get<T>(path: string): Promise<T> {
   return request<T>(path)
 }
 
+/** JSON-RPC call against the stateless MCP endpoint (POST /mcp). */
+export async function mcpRpc(
+  method: string,
+  params?: Record<string, unknown>
+): Promise<{ result?: unknown; error?: { code: number; message: string } }> {
+  const body = await post<{
+    result?: unknown
+    error?: { code: number; message: string }
+  }>("/mcp", { jsonrpc: "2.0", id: Date.now() % 1_000_000, method, ...(params ? { params } : {}) })
+  return body
+}
+
 function post<T>(path: string, body: unknown): Promise<T> {
   return request<T>(path, {
     method: "POST",
@@ -359,7 +371,8 @@ export const api = {
   crons: () => get<CronJob[]>("/api/crons"),
   traces: () => get<TraceSummary[]>("/api/traces"),
   jobTree: (id: string) => get<JobTreeNode>(`/api/job-tree/${encodeURIComponent(id)}`),
-  trace: (traceId: string) => get<Message[]>(`/api/traces/${encodeURIComponent(traceId)}`),
+  trace: (traceId: string) =>
+    get<{ traceId: string; rows: Message[] }>(`/api/traces/${encodeURIComponent(traceId)}`),
   singletons: () => get<{ runners: RunnerReport[] }>("/api/singletons"),
   metricsHistory: (opts?: { rangeMs?: number }) =>
     get<MetricPoint[]>(

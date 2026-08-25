@@ -1,6 +1,7 @@
 import * as React from "react"
 import { api, type MessageStatus, type Workflow, type WorkflowRun } from "../api.ts"
 import { ActivityDot, FilterChip, SkeletonTable, SortableTh, STICKY_TH, useHashParam, useSort } from "../components/pieces.tsx"
+import { FilterBar, presenceFacet, useFacets, type FacetDef } from "../components/filters/index.tsx"
 import { Badge, Card, CardContent, Select, Table, TBody, TD, TH, THead, TR } from "../components/ui.tsx"
 import { ErrorNote, PageHeader, useLive } from "../shell.tsx"
 import { usePauseWhile } from "../live.ts"
@@ -18,6 +19,19 @@ export function WorkflowListPage() {
   const [sortByParam, setSortByParam] = useHashParam("sort")
   const sortBy = (["name", "runs", "failedRuns"].includes(sortByParam) ? sortByParam : "name") as WorkflowSort
   const { loading, error, refresh } = useLive(async () => setRows(await api.workflows()))
+
+  const facetDefs: FacetDef<Workflow>[] = [
+    {
+      key: "failures",
+      label: "failures",
+      options: () => [
+        { value: "yes", label: "with failures" },
+        { value: "no", label: "all healthy" }
+      ],
+      predicate: (w, v) => v.includes((w.failedRuns ?? 0) > 0 ? "yes" : "no")
+    }
+  ]
+  const facets = useFacets(rows, facetDefs)
 
   if (loading && rows.length === 0) return <SkeletonTable rows={6} cols={4} />
   const totalRuns = rows.reduce((acc, w) => acc + w.runs, 0)
@@ -46,6 +60,7 @@ export function WorkflowListPage() {
           <FilterChip label={`sort: ${sortBy === "runs" ? "most runs" : "most failed"}`} onRemove={() => setSortByParam("")} />
         </div>
       )}
+      <FilterBar defs={facetDefs} rows={rows} facets={facets} />
       <ErrorNote error={error} onRetry={refresh} />
       {rows.length === 0 ? (
         <Card>
@@ -101,12 +116,27 @@ export function WorkflowRunsPage({ name }: { name: string }) {
   usePauseWhile(openExecution !== null)
   const sort = useSort<RunRow>()
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const facetDefs: FacetDef<RunRow>[] = [
+    {
+      key: "status",
+      label: "status",
+      options: (all) => [...new Set(all.map((r) => r.status))].map((v) => ({ value: v })),
+      predicate: (r, v) => v.includes(r.status)
+    },
+    presenceFacet("failed", "failed", (r) => Boolean((r as RunRow).failed))
+  ]
+  const facets = useFacets(runs ?? [], facetDefs)
+
   if (loading && runs === null) return <SkeletonTable rows={8} cols={4} />
 
-  const visibleRuns = statusFilter ? (runs ?? []).filter((r) => r.status === statusFilter) : runs ?? []
+  const visibleRuns = facets.filtered.filter(
+    (r) => !statusFilter || r.status === statusFilter
+  )
 
   return (
     <div>
+      <FilterBar defs={facetDefs} rows={runs ?? []} facets={facets} />
       <PageHeader title={name} subtitle="workflow executions">
         <a href="#/workflows" className="text-[13px] text-kumo-subtle hover:text-kumo-default">
           ← all workflows

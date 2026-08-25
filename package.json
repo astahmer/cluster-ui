@@ -12,7 +12,9 @@
     "typecheck": "bash -c 'out=$(tsc --noEmit --pretty false 2>&1); filtered=$(echo \"$out\" | grep -E \"^(server|web|vite\\\\.config|index\\\\.html)\"); if [ -n \"$filtered\" ]; then echo \"$filtered\"; exit 1; fi'",
     "e2e": "node --experimental-transform-types --no-warnings --import ./scripts/register-ts-resolve.mjs server/scripts/e2e.ts",
     "smoke": "node web/smoke.mjs",
-    "demo-runner": "node --experimental-transform-types --no-warnings --import ./scripts/register-ts-resolve.mjs server/scripts/demo-runner.ts"
+    "demo-runner": "node --experimental-transform-types --no-warnings --import ./scripts/register-ts-resolve.mjs server/scripts/demo-runner.ts",
+    "dev:redis": "redis-server --port 6399 --daemonize no",
+    "seed:redis": "node scripts/demo-redis.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "4.0.41",

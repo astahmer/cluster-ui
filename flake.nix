@@ -24,6 +24,8 @@
             pkgs.gcc
             # handy for poking the cluster storage directly
             pkgs.sqlite
+            # local BullMQ demo cluster (pnpm dev:redis / seed:redis)
+            pkgs.redis
           ];
 
           shellHook = ''

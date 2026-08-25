@@ -11,6 +11,7 @@ import { EntityInstancesPage } from "./pages/EntityInstances.tsx"
 import { SingletonsPage } from "./pages/Singletons.tsx"
 import { TracesPage, TraceDetailPage } from "./pages/Traces.tsx"
 import { AgentPage } from "./pages/Agent.tsx"
+import { McpPage } from "./pages/Mcp.tsx"
 
 /**
  * MessagesPage will accept these once W2 lands (CONTRACT.md); the cast keeps
@@ -79,6 +80,9 @@ export function App() {
         break
       case "agent":
         content = <AgentPage />
+        break
+      case "mcp":
+        content = <McpPage />
         break
       case "overview":
         content = <OverviewPage />

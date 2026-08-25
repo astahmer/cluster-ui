@@ -88,6 +88,10 @@ function intParam(u: string | null | undefined): number | undefined {
 }
 
 /** request with merged path params + query params */
+/** json() that also accepts promises (redis repo methods are all async) */
+const jsonMaybeAsync = (value: unknown) =>
+  Effect.map(Effect.tryPromise(() => Promise.resolve(value)), json as (v: unknown) => HttpServerResponse.HttpServerResponse)
+
 const req = Effect.all([HttpServerRequest.HttpServerRequest, HttpRouter.params]).pipe(
   Effect.map(([request, params]) => {
     const url = new URL(request.url, "http://localhost")
@@ -280,33 +284,37 @@ const baseRouter = HttpRouter.empty.pipe(
 
   HttpRouter.get(
     "/api/overview",
-    Effect.map(req, (p) => {
+    Effect.flatMap(req, (p) => {
       const repo = repoFor(p.cluster)
-      return repo ? json(repo.overview()) : notFound("cluster")
+      if (!repo) return Effect.succeed(notFound("cluster"))
+      return jsonMaybeAsync(repo.overview())
     })
   ),
 
   HttpRouter.get(
     "/api/runners",
-    Effect.map(req, (p) => {
+    Effect.flatMap(req, (p) => {
       const repo = repoFor(p.cluster)
-      return repo ? json(repo.runners()) : notFound("cluster")
+      if (!repo) return Effect.succeed(notFound("cluster"))
+      return jsonMaybeAsync(repo.runners())
     })
   ),
 
   HttpRouter.get(
     "/api/shards",
-    Effect.map(req, (p) => {
+    Effect.flatMap(req, (p) => {
       const repo = repoFor(p.cluster)
-      return repo ? json(repo.shards()) : notFound("cluster")
+      if (!repo) return Effect.succeed(notFound("cluster"))
+      return jsonMaybeAsync(repo.shards())
     })
   ),
 
   HttpRouter.get(
     "/api/entities",
-    Effect.map(req, (p) => {
+    Effect.flatMap(req, (p) => {
       const repo = repoFor(p.cluster)
-      return repo ? json(repo.entities()) : notFound("cluster")
+      if (!repo) return Effect.succeed(notFound("cluster"))
+      return jsonMaybeAsync(repo.entities())
     })
   ),
 
@@ -327,9 +335,10 @@ const baseRouter = HttpRouter.empty.pipe(
 
   HttpRouter.get(
     "/api/crons",
-    Effect.map(req, (p) => {
+    Effect.flatMap(req, (p) => {
       const repo = repoFor(p.cluster)
-      return repo ? json(repo.crons()) : notFound("cluster")
+      if (!repo) return Effect.succeed(notFound("cluster"))
+      return jsonMaybeAsync(repo.crons())
     })
   ),
 
@@ -344,9 +353,9 @@ const baseRouter = HttpRouter.empty.pipe(
 
   HttpRouter.get(
     "/api/messages",
-    Effect.map(req, (p): HttpServerResponse.HttpServerResponse => {
+    Effect.flatMap(req, (p) => {
       const repo = repoFor(p.cluster)
-      if (!repo) return notFound("cluster")
+      if (!repo) return Effect.succeed(notFound("cluster"))
       const failedParam = p.failed
       const query: MessageQuery = {
         status: p.status,
@@ -367,33 +376,40 @@ const baseRouter = HttpRouter.empty.pipe(
         page: intParam(p.page),
         pageSize: intParam(p.pageSize)
       }
-      return json(repo.listMessages(query))
+      if (repo.db === null) {
+        return jsonMaybeAsync((repo as unknown as { listMessages(q: MessageQuery): Promise<unknown> }).listMessages(query))
+      }
+      return Effect.succeed(json(repo.listMessages(query)))
     })
   ),
 
   HttpRouter.get(
     "/api/messages/:id",
-    Effect.map(req, (p) => {
-      const repo = repoFor(p.cluster)
-      if (!repo) return notFound("cluster")
-      const result = repo.getMessage(p.id!)
-      return result ? json(result) : notFound("message")
-    })
+    Effect.flatMap(req, (p) =>
+      Effect.tryPromise(async (): Promise<HttpServerResponse.HttpServerResponse> => {
+        const repo = repoFor(p.cluster)
+        if (!repo) return notFound("cluster")
+        const result = await Promise.resolve(repo.getMessage(p.id!))
+        return result ? json(result) : notFound("message")
+      })
+    )
   ),
 
   HttpRouter.get(
     "/api/workflows",
-    Effect.map(req, (p) => {
+    Effect.flatMap(req, (p) => {
       const repo = repoFor(p.cluster)
-      return repo ? json(repo.workflows()) : notFound("cluster")
+      if (!repo) return Effect.succeed(notFound("cluster"))
+      return jsonMaybeAsync(repo.workflows())
     })
   ),
 
   HttpRouter.get(
     "/api/workflows/:name",
-    Effect.map(req, (p) => {
+    Effect.flatMap(req, (p) => {
       const repo = repoFor(p.cluster)
-      return repo ? json(repo.workflowRuns(decodeURIComponent(p.name!))) : notFound("cluster")
+      if (!repo) return Effect.succeed(notFound("cluster"))
+      return jsonMaybeAsync(repo.workflowRuns(decodeURIComponent(p.name!)))
     })
   ),
 
@@ -522,7 +538,7 @@ const redisRouter = HttpRouter.empty.pipe(
   ),
   HttpRouter.get(
     "/api/queues",
-    Effect.flatMap(HttpRouter.params, (params) =>
+    Effect.flatMap(req, (params) =>
       Effect.flatMap(
         Effect.sync(() => repoFor(params.cluster)),
         (repo) => {
@@ -639,9 +655,10 @@ export const api = HttpRouter.concat(HttpRouter.concat(baseRouter, redisRouter),
 
   HttpRouter.get(
     "/api/traces",
-    Effect.map(req, (p) => {
+    Effect.flatMap(req, (p) => {
       const repo = repoFor(p.cluster)
-      return repo ? json(repo.traces(p.limit ? intParam(p.limit) ?? 50 : 50)) : notFound("cluster")
+      if (!repo) return Effect.succeed(notFound("cluster"))
+      return jsonMaybeAsync(repo.traces(p.limit ? intParam(p.limit) ?? 50 : 50))
     })
   ),
 

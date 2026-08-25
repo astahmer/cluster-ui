@@ -5,11 +5,23 @@ import { Badge, Table, TBody, TD, TH, THead, TR } from "../components/ui.tsx"
 import { ErrorNote, PageHeader, useLive } from "../shell.tsx"
 import { Empty } from "../kumo"
 import { SkeletonTable, SortableTh, useSort } from "../components/pieces.tsx"
+import { FilterBar, presenceFacet, useFacets, type FacetDef } from "../components/filters/index.tsx"
 
 export function RunnersPage() {
   const [rows, setRows] = React.useState<Runner[]>([])
   const { loading, error, refresh } = useLive(async () => setRows(await api.runners()))
   const sort = useSort<Runner>()
+
+  const facetDefs: FacetDef<Runner>[] = [
+    {
+      key: "group",
+      label: "group",
+      options: (all) => [...new Set(all.flatMap((r) => r.groups))].sort().map((g) => ({ value: g })),
+      predicate: (r, v) => v.some((g) => r.groups.includes(g))
+    },
+    presenceFacet("stale", "stale", (r) => Boolean(r.stale))
+  ]
+  const facets = useFacets(rows, facetDefs)
 
   if (loading && rows.length === 0) return <SkeletonTable />
   const totalShards = rows.reduce((acc, r) => acc + r.shards, 0)
@@ -22,6 +34,7 @@ export function RunnersPage() {
         subtitle="registered cluster nodes and their shard load"
       />
       <ErrorNote error={error} onRetry={refresh} />
+      <FilterBar defs={facetDefs} rows={rows} facets={facets} />
       <div className="rounded-lg border border-kumo-line bg-kumo-base">
         <Table>
           <THead>

@@ -3,6 +3,7 @@ import { api, type Shard } from "../api.ts"
 import { Badge, Select, Table, TBody, TD, THead, TR } from "../components/ui.tsx"
 import { ErrorNote, PageHeader, usePolling } from "../shell.tsx"
 import { FilterChip, SkeletonTable, SortableTh, useHashParam, useSort } from "../components/pieces.tsx"
+import { FilterBar, useFacets, type FacetDef } from "../components/filters/index.tsx"
 
 type ShardFilter = "all" | "assigned" | "unassigned"
 
@@ -14,8 +15,22 @@ export function ShardsPage() {
   const { loading, error, refresh } = usePolling(async () => setShards(await api.shards()))
   const sort = useSort<Shard>()
 
+  const facetDefs: FacetDef<Shard>[] = [
+    {
+      key: "assignment",
+      label: "assignment",
+      options: () => [
+        { value: "assigned", label: "assigned" },
+        { value: "unassigned", label: "unassigned" }
+      ],
+      predicate: (shard, v) =>
+        v.includes(shard.address !== null ? "assigned" : "unassigned")
+    }
+  ]
+  const facets = useFacets(shards, facetDefs)
+
   if (loading && shards.length === 0) return <SkeletonTable />
-  const filtered = shards.filter((s) =>
+  const filtered = facets.filtered.filter((s) =>
     filter === "all" ? true : filter === "assigned" ? s.address !== null : s.address === null
   )
   const assignedCount = shards.filter((s) => s.address !== null).length
@@ -31,9 +46,10 @@ export function ShardsPage() {
       </PageHeader>
       {filter !== "all" && (
         <div className="mb-2">
-          <FilterChip label={`filter: ${filter}`} onRemove={() => setFilter("")} />
+          <FilterChip label={`filter: ${filter}`} onRemove={() => setFilter("all")} />
         </div>
       )}
+      <FilterBar defs={facetDefs} rows={shards} facets={facets} />
       <ErrorNote error={error} onRetry={refresh} />
       <div className="mb-4 rounded-lg border border-kumo-line bg-kumo-base p-4">
         <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-kumo-subtle">

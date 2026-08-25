@@ -5,6 +5,7 @@ import { RunnerRuntimePanel } from "../components/runner-state.tsx"
 import { Badge, Table, TBody, TD, TH, THead, TR } from "../components/ui.tsx"
 import { ErrorNote, PageHeader, useRoute, useLive } from "../shell.tsx"
 import { Empty, Tabs, Tooltip } from "../kumo"
+import { FilterBar, presenceFacet, useFacets, type FacetDef } from "../components/filters/index.tsx"
 /**
  * Singleton visibility page. Runner-resident state (singletons, in-memory
  * entities) is only visible for runners that mount the optional
@@ -18,6 +19,11 @@ export function SingletonsPage() {
   // cluster param flows through to the runtime fan-out routes too
   const route = useRoute()
   const cluster = route.params.get("cluster") ?? undefined
+
+  const facetDefs: FacetDef<RunnerReport>[] = [
+    presenceFacet("reporting", "reporting", (r) => Boolean(r.state))
+  ]
+  const facets = useFacets(runners, facetDefs)
 
   if (loading && runners.length === 0) return null
 
@@ -63,7 +69,7 @@ export function SingletonsPage() {
             </TR>
           </THead>
           <TBody>
-            {runners.map((r) => (
+            {facets.filtered.map((r) => (
               <TR key={r.address}>
                 <TD className="font-medium">{r.address}</TD>
                 <TD>

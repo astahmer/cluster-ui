@@ -45,6 +45,71 @@ export function WorkflowRunPage({
   const [error, setError] = React.useState<string | null>(null)
   const [actionError, setActionError] = React.useState<string | null>(null)
   const [busy, setBusy] = React.useState(false)
+  const [timelineOpen, setTimelineOpen] = React.useState(true)
+  const [view, setView] = React.useState<"timeline" | "graph">("timeline")
+
+  const run = data?.run ?? null
+  const extras = (run ?? null) as (WorkflowRunDetail["run"] & RunExtras) | null
+  const result = extras?.result ?? null
+
+
+  // waterfall spans: run message + its activities on one shared axis; an
+  // activity's bar runs until the next event (gaps between events are the signal)
+  const timelineSpans = React.useMemo(() => {
+    if (!run) return []
+    const activities = [...((data?.activities ?? []) as ActivityRow[])].sort((a, b) => a.createdAt - b.createdAt)
+    const spans: TimelineSpan[] = [
+      {
+        key: `run-${run.id}`,
+        label: `workflow ${executionId}`,
+        group: "workflow",
+        startMs: run.createdAt,
+        endMs: activities.length > 0 ? activities[activities.length - 1].createdAt : run.createdAt,
+        tone:
+          run.status === "done" ? (result?.outcome === "Failure" ? "danger" : "success") : "warning",
+        badge: result?.outcome === "Failure" ? <Badge tone="err">failed</Badge> : undefined
+      }
+    ]
+    activities.forEach((a, i) => {
+      const next = activities[i + 1]
+      spans.push({
+        key: a.id,
+        label: a.activityName ?? a.tag ?? a.kind,
+        group: a.activityName ? "activities" : (a.tag ?? a.kind),
+        startMs: a.createdAt,
+        endMs: next ? next.createdAt : a.createdAt,
+        tone: a.failed ? "danger" : a.status === "done" ? "success" : "warning",
+        badge:
+          typeof a.attempt === "number" && a.attempt > 1 ? (
+            <Badge tone="warn">attempt {a.attempt}</Badge>
+          ) : undefined
+      })
+    })
+    return spans
+  }, [run, (data?.activities ?? []) as ActivityRow[], executionId, result])
+
+  // DAG: workflow root -> activity steps (same source data as the waterfall)
+  const flowSpecs = React.useMemo<FlowNodeSpec[]>(() => {
+    if (!run) return []
+    const activities = [...((data?.activities ?? []) as ActivityRow[])].sort((a, b) => a.createdAt - b.createdAt)
+    return [
+      {
+        key: `run-${run.id}`,
+        label: `workflow ${executionId}`,
+        sublabel: `${activities.length} activities`,
+        tone:
+          run.status === "done" ? (result?.outcome === "Failure" ? "danger" : "success") : "warning",
+        children: activities.map((a) => ({
+          key: a.id,
+          label: a.activityName ?? a.tag ?? a.kind,
+          sublabel:
+            typeof a.attempt === "number" && a.attempt > 1 ? `attempt ${a.attempt}` : a.status,
+          tone: a.failed ? ("danger" as const) : a.status === "done" ? ("success" as const) : ("running" as const)
+        }))
+      }
+    ]
+  }, [run, (data?.activities ?? []) as ActivityRow[], executionId, result])
+
 
   const reload = React.useRef(() => {
     api
@@ -58,9 +123,6 @@ export function WorkflowRunPage({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   React.useEffect(reload.current, [name, executionId])
 
-  const run = data?.run ?? null
-  const extras = (run ?? null) as (WorkflowRunDetail["run"] & RunExtras) | null
-  const result = extras?.result ?? null
 
   const act = async (kind: "retry" | "interrupt") => {
     if (!run) return
@@ -104,65 +166,6 @@ export function WorkflowRunPage({
 
   const canRetry = run.status === "done"
   const canCancel = run.status === "pending" || run.status === "inflight" || run.status === "scheduled"
-  const [timelineOpen, setTimelineOpen] = React.useState(true)
-  const [view, setView] = React.useState<"timeline" | "graph">("timeline")
-
-  // waterfall spans: run message + its activities on one shared axis; an
-  // activity's bar runs until the next event (gaps between events are the signal)
-  const timelineSpans = React.useMemo(() => {
-    if (!run) return []
-    const activities = [...(data.activities as ActivityRow[])].sort((a, b) => a.createdAt - b.createdAt)
-    const spans: TimelineSpan[] = [
-      {
-        key: `run-${run.id}`,
-        label: `workflow ${executionId}`,
-        group: "workflow",
-        startMs: run.createdAt,
-        endMs: activities.length > 0 ? activities[activities.length - 1].createdAt : run.createdAt,
-        tone:
-          run.status === "done" ? (result?.outcome === "Failure" ? "danger" : "success") : "warning",
-        badge: result?.outcome === "Failure" ? <Badge tone="err">failed</Badge> : undefined
-      }
-    ]
-    activities.forEach((a, i) => {
-      const next = activities[i + 1]
-      spans.push({
-        key: a.id,
-        label: a.activityName ?? a.tag ?? a.kind,
-        group: a.activityName ? "activities" : (a.tag ?? a.kind),
-        startMs: a.createdAt,
-        endMs: next ? next.createdAt : a.createdAt,
-        tone: a.failed ? "danger" : a.status === "done" ? "success" : "warning",
-        badge:
-          typeof a.attempt === "number" && a.attempt > 1 ? (
-            <Badge tone="warn">attempt {a.attempt}</Badge>
-          ) : undefined
-      })
-    })
-    return spans
-  }, [run, data.activities, executionId, result])
-
-  // DAG: workflow root -> activity steps (same source data as the waterfall)
-  const flowSpecs = React.useMemo<FlowNodeSpec[]>(() => {
-    if (!run) return []
-    const activities = [...(data.activities as ActivityRow[])].sort((a, b) => a.createdAt - b.createdAt)
-    return [
-      {
-        key: `run-${run.id}`,
-        label: `workflow ${executionId}`,
-        sublabel: `${activities.length} activities`,
-        tone:
-          run.status === "done" ? (result?.outcome === "Failure" ? "danger" : "success") : "warning",
-        children: activities.map((a) => ({
-          key: a.id,
-          label: a.activityName ?? a.tag ?? a.kind,
-          sublabel:
-            typeof a.attempt === "number" && a.attempt > 1 ? `attempt ${a.attempt}` : a.status,
-          tone: a.failed ? ("danger" as const) : a.status === "done" ? ("success" as const) : ("running" as const)
-        }))
-      }
-    ]
-  }, [run, data.activities, executionId, result])
 
   return (
     <div className="space-y-4 text-[13px]">

@@ -75,7 +75,7 @@ export function makeRedisRepo(url: string): import("./queries.ts").Repo {
   const jobIds = async (queue: string, state: JobState, limit = SCAN_WINDOW): Promise<string[]> => {
     if (state === "completed" || state === "failed" || state === "delayed") {
       // newest-first zsets ordered by score desc
-      const ids = await withTimeout(redis.zrange(`bull:${queue}:${state}`, 0, limit - 1))
+      const ids = await withTimeout(redis.zrange(`bull:${queue}:${state}`, 0, `${limit - 1}`))
       return ids.reverse()
     }
     if (state === "active") {
@@ -220,7 +220,9 @@ export function makeRedisRepo(url: string): import("./queries.ts").Repo {
       const counts = { pending: 0, inflight: 0, scheduled: 0, done: 0, failed: 0 }
       const perQueue = new Map<string, number>()
       for (const j of jobs) {
-        counts[statusOf(j.state) as keyof typeof counts]++
+        // failed jobs keep their own bucket even though view status is "done"
+        if (j.state === "failed") counts.failed++
+        else counts[statusOf(j.state) as keyof typeof counts]++
         perQueue.set(j.queue, (perQueue.get(j.queue) ?? 0) + 1)
       }
       const topEntities = [...perQueue.entries()]
@@ -358,7 +360,7 @@ export function makeRedisRepo(url: string): import("./queries.ts").Repo {
       const ids =
         opts.olderThanMs !== undefined ?
           await withTimeout(redis.zrangebyscore(`bull:${queue}:${state}`, "-inf", maxScore, "LIMIT", 0, cap)) :
-          (await withTimeout(redis.zrange(`bull:${queue}:${state}`, 0, cap - 1))).slice(0, cap).reverse()
+          (await withTimeout(redis.zrange(`bull:${queue}:${state}`, 0, `${cap - 1}`))).slice(0, cap).reverse()
       let removed = 0
       for (const jobId of ids) {
         await withTimeout(
@@ -462,9 +464,12 @@ export function makeRedisRepo(url: string): import("./queries.ts").Repo {
       if (depth < 8) {
         const childIds = await withTimeout(redis.smembers(`bull:${q}:${jid}:children`))
         for (const childId of childIds.slice(0, 50)) {
-          // children live under their own queues; child hash stores its own queue-less key —
-          // BullMQ keeps child jobs in the SAME queue as declared when added
-          const child = await buildNode(q, childId, depth + 1)
+          // child ids are stored as "<queue>:<jobId>" (our seed convention) or bare
+          // BullMQ job ids living in the same queue; resolve both
+          const sep = childId.indexOf(":")
+          const [childQueue, childJob] =
+            sep > 0 ? [childId.slice(0, sep), childId.slice(sep + 1)] : [q, childId]
+          const child = await buildNode(childQueue, childJob, depth + 1)
           if (child) (node.children as unknown[]).push(child)
         }
       }

@@ -10,6 +10,7 @@ import {
   useSort
 } from "../components/pieces.tsx"
 import { Badge, Input, Table, TBody, TD, THead, TR } from "../components/ui.tsx"
+import { FilterBar, presenceFacet, useFacets, type FacetDef } from "../components/filters/index.tsx"
 import { ErrorNote, PageHeader, usePolling } from "../shell.tsx"
 
 export function EntitiesPage() {
@@ -18,8 +19,27 @@ export function EntitiesPage() {
   const { loading, error, refresh } = usePolling(async () => setRows(await api.entities()))
   const sort = useSort<EntityStat>()
 
+  const facetDefs: FacetDef<EntityStat>[] = [
+    {
+      key: "activity",
+      label: "activity",
+      options: () => [
+        { value: "active", label: "active now (pending/in-flight)" },
+        { value: "quiet", label: "quiet" }
+      ],
+      predicate: (r, v) => v.includes(r.pending + r.inflight > 0 ? "active" : "quiet")
+    },
+    presenceFacet("hasScheduled", "scheduled", (r) => r.scheduled > 0),
+    presenceFacet("hasInflight", "in-flight", (r) => r.inflight > 0),
+    presenceFacet("hasScheduled", "scheduled", (r) => r.scheduled > 0)
+  ]
+  const facets = useFacets(rows, facetDefs)
+
   if (loading && rows.length === 0) return <SkeletonTable />
-  const filtered = rows.filter((r) => r.entityType.toLowerCase().includes(q.toLowerCase()))
+  const qLower = q.toLowerCase()
+  const filtered = facets.filtered.filter(
+    (r) => qLower === "" || r.entityType.toLowerCase().includes(qLower)
+  )
   const sorted = sort.sorted(filtered)
 
   return (
@@ -33,6 +53,7 @@ export function EntitiesPage() {
           data-search-input
         />
       </PageHeader>
+      <FilterBar defs={facetDefs} rows={rows} facets={facets} />
       <ErrorNote error={error} onRetry={refresh} />
       {(q !== "" || sort.sortKey !== null) && (
         <div className="mb-2 flex items-center gap-1.5">

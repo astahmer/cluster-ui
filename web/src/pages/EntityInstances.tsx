@@ -1,6 +1,7 @@
 import * as React from "react"
 import { api, type EntityInstance } from "../api.ts"
 import { ActivityDot, SkeletonTable } from "../components/pieces.tsx"
+import { FilterBar, presenceFacet, useFacets, type FacetDef } from "../components/filters/index.tsx"
 import { Badge, Button, Input, Table, TBody, TD, TH, THead, TR } from "../components/ui.tsx"
 import { ErrorNote, PageHeader, usePolling } from "../shell.tsx"
 import { Empty } from "../kumo"
@@ -29,6 +30,13 @@ export function EntityInstancesPage({ entityType }: { entityType: string }) {
     },
     [entityType, debouncedQ, page, pageSize]
   )
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const facetDefs: FacetDef<EntityInstance>[] = [
+    presenceFacet("failed", "with failures", (r) => r.failed > 0),
+    presenceFacet("pending", "currently pending", (r) => r.pending > 0)
+  ]
+  const facets = useFacets(rows, facetDefs)
 
   if (loading && rows.length === 0) return <SkeletonTable rows={10} cols={4} />
 
@@ -66,7 +74,7 @@ export function EntityInstancesPage({ entityType }: { entityType: string }) {
             </TR>
           </THead>
           <TBody>
-            {(loading && rows.length === 0 ? [] : rows).map((r) => (
+            {(loading && rows.length === 0 ? [] : facets.filtered).map((r) => (
               <TR
                 key={r.entityId}
                 className="cursor-pointer"

@@ -9,6 +9,7 @@ import {
 } from "../api.ts"
 import { downloadCsv, downloadJson } from "../export.ts"
 import { DetailPanel, SkeletonTable, StatusBadge, statusTone, useMessageDetail } from "../components/pieces.tsx"
+import { FilterBar, useFacets, type FacetDef } from "../components/filters/index.tsx"
 import { FlowGraph, jobTreeToSpecs } from "../components/flow-graph.tsx"
 import { confirmDialog } from "../components/dialogs.tsx"
 import { toast } from "../toast.tsx"
@@ -146,6 +147,25 @@ export function MessagesPage({ initialFilters }: { initialFilters?: MessagesInit
       ),
     [status, tab, entityType, entityId, debouncedQ, createdAfter, createdBefore, sort, page, pageSize]
   )
+
+  // client-side facets over the loaded page rows — server filters above stay authoritative
+  const pageRows = data?.rows ?? []
+  const facetDefs: FacetDef<Message>[] = [
+    {
+      key: "entityType",
+      label: "entity type",
+      options: (all) => [...new Set(all.map((r) => r.entityType))].sort().map((v) => ({ value: v })),
+      predicate: (r, v) => v.includes(r.entityType)
+    },
+    {
+      key: "tag",
+      label: "tag",
+      options: (all) =>
+        [...new Set(all.map((r) => r.tag).filter((t): t is string => Boolean(t)))].sort().map((v) => ({ value: v })),
+      predicate: (r, v) => (r.tag ? v.includes(r.tag) : false)
+    }
+  ]
+  const facets = useFacets(pageRows, facetDefs)
 
   const runAction = async (fn: () => Promise<unknown>, what: string) => {
     if (
@@ -349,6 +369,8 @@ export function MessagesPage({ initialFilters }: { initialFilters?: MessagesInit
 
       <ErrorNote error={error ?? actionError} onRetry={refresh} />
 
+      <FilterBar defs={facetDefs} rows={pageRows} facets={facets} />
+
       {loading && !data && <SkeletonTable rows={12} cols={6} />}
       {!loading && (
       <div className="rounded-lg border border-kumo-line bg-kumo-base">
@@ -367,12 +389,25 @@ export function MessagesPage({ initialFilters }: { initialFilters?: MessagesInit
               <TH>Tag</TH>
               <TH>Shard</TH>
               <TH>Replies</TH>
-              <TH>{tab === "scheduled" ? "Delivers" : "Created"}</TH>
+              <TH>
+                <button
+                  type="button"
+                  title="toggle server-side sort"
+                  className="cursor-pointer"
+                  onClick={() => {
+                    setSort((prev) => (prev === "id" ? "deliverAt" : "id"))
+                    setPage(1)
+                  }}
+                >
+                  {tab === "scheduled" ? "Delivers" : "Created"}{" "}
+                  {sort !== "id" && <span aria-hidden>▼</span>}
+                </button>
+              </TH>
               <TH />
             </TR>
           </THead>
           <TBody>
-            {(loading && !data ? [] : data!.rows).map((m) => (
+            {(loading && !data ? [] : facets.filtered).map((m) => (
               <MessageRow
                 key={m.id}
                 m={m}

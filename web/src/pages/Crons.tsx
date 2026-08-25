@@ -6,6 +6,7 @@ import { ErrorNote, PageHeader, usePolling } from "../shell.tsx"
 import { ClockCounterClockwise } from "@phosphor-icons/react"
 import { Empty } from "../kumo"
 import { FilterChip, SkeletonTable, SortableTh, STICKY_TH, useHashParam, useSort } from "../components/pieces.tsx"
+import { FilterBar, presenceFacet, useFacets, type FacetDef } from "../components/filters/index.tsx"
 
 function statusToneFor(status: CronJob["lastStatus"]) {
   switch (status) {
@@ -30,12 +31,31 @@ export function CronsPage() {
   const { loading, error, refresh } = usePolling(async () => setRows(await api.crons()))
   const sort = useSort<CronJob>()
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const facetDefs: FacetDef<CronJob>[] = [
+    {
+      key: "status",
+      label: "last run",
+      options: (all) => [...new Set(all.map((c) => c.lastStatus))].map((v) => ({ value: v })),
+      predicate: (c, v) => v.includes(c.lastStatus)
+    },
+    {
+      key: "namespace",
+      label: "namespace",
+      options: (all) =>
+        [...new Set(all.map((c) => (c.name.split("/")[0] ?? c.name)))].map((v) => ({ value: v })),
+      predicate: (c, v) => v.some((n) => c.name.startsWith(n))
+    },
+    presenceFacet("overdue", "overdue", (c) => c.lastStatus !== "done" && c.nextRunAt !== null && c.nextRunAt < Date.now())
+  ]
+  const facets = useFacets(rows, facetDefs)
+
   if (loading && rows.length === 0) return <SkeletonTable />
 
   const overdue = (c: CronJob) =>
     c.lastStatus !== "done" && c.nextRunAt !== null && c.nextRunAt < Date.now()
 
-  const visible = overdueOnly ? rows.filter(overdue) : rows
+  const visible = facets.filtered.filter((c) => !overdueOnly || overdue(c))
 
   return (
     <div>
@@ -52,6 +72,7 @@ export function CronsPage() {
           overdue only
         </label>
       </PageHeader>
+      <FilterBar defs={facetDefs} rows={rows} facets={facets} />
       <ErrorNote error={error} onRetry={refresh} />
       {(overdueOnly || sort.sortKey !== null) && (
         <div className="mb-2 flex items-center gap-1.5">

@@ -39,9 +39,23 @@ The server needs read access to the SQLite database used by the cluster's
 ## Development
 
 ```sh
-pnpm dev:server   # API only, tsx watch on :8787
+pnpm dev:server   # API only, node --watch on :8787 (native TS, no tsx)
 pnpm dev:web      # vite dev server (proxies /api to :8787)
 ```
+
+### Local redis demo
+
+Test the redis (BullMQ) cluster features without any external service:
+
+```sh
+pnpm dev:redis    # redis-server on :6399 (foreground)
+pnpm seed:redis   # flush + seed ~70 demo jobs across 6 queues + one flow DAG
+cp .env.example .env   # enables CLUSTER_UI_CLUSTERS with local-redis
+pnpm dev:server   # picks up .env automatically
+```
+
+The dashboard then shows a `local-redis` cluster in the switcher with live
+queues, states, failures and a parent/child job-flow DAG.
 
 ## What you get
 
