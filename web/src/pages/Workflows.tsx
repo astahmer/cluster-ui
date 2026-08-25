@@ -104,9 +104,36 @@ export function WorkflowListPage() {
 
 const RUN_STATUSES = ["pending", "inflight", "scheduled", "done"] as const
 
-export function WorkflowRunsPage({ name }: { name: string }) {
+export function WorkflowRunsPage({
+  name,
+  executionId: executionIdProp
+}: {
+  name: string
+  /** deep link #/workflows/<name>/<executionId> — the run modal hydrates from this */
+  executionId?: string
+}) {
   const [runs, setRuns] = React.useState<RunRow[] | null>(null)
-  const [openExecution, setOpenExecution] = React.useState<string | null>(null)
+  const [openExecution, setOpenExecutionState] = React.useState<string | null>(
+    executionIdProp ?? null
+  )
+
+  // open/close writes the hash so the run modal is an addressable URL (UX review P1-1)
+  const setOpenExecution = React.useCallback(
+    (exec: string | null) => {
+      setOpenExecutionState(exec)
+      const raw = window.location.hash.slice(1) || `/workflows/${encodeURIComponent(name)}`
+      const qIdx = raw.indexOf("?")
+      const params = new URLSearchParams(qIdx === -1 ? "" : raw.slice(qIdx + 1))
+      const qs = params.toString()
+      window.location.hash = `/workflows/${encodeURIComponent(name)}${
+        exec !== null ? `/${encodeURIComponent(exec)}` : ""
+      }${qs ? `?${qs}` : ""}`
+    },
+    [name]
+  )
+  React.useEffect(() => {
+    setOpenExecutionState(executionIdProp ?? null)
+  }, [executionIdProp])
   const [statusParam, setStatusParam] = useHashParam("status")
   const statusFilter = RUN_STATUSES.includes(statusParam as never) ? statusParam : ""
   const { loading, error, refresh } = useLive(async () =>

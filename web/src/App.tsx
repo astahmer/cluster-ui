@@ -15,8 +15,9 @@ import { McpPage } from "./pages/Mcp.tsx"
 import { QueuesPage } from "./pages/Queues.tsx"
 
 /**
- * MessagesPage will accept these once W2 lands (CONTRACT.md); the cast keeps
- * this file compiling against either signature.
+ * MessagesPage supports initialFilters (CONTRACT.md W2) and messageId
+ * (#/messages/<id> deep links, UX review P1-1); the cast keeps this file
+ * compiling against either signature.
  */
 const SeededMessagesPage = MessagesPage as unknown as React.ComponentType<{
   initialFilters?: {
@@ -26,6 +27,7 @@ const SeededMessagesPage = MessagesPage as unknown as React.ComponentType<{
     failed?: string
     q?: string
   }
+  messageId?: string
 }>
 
 const TypedEntityInstances = EntityInstancesPage as React.ComponentType<{ entityType: string }>
@@ -71,7 +73,11 @@ export function App() {
       case "workflows":
         content =
           parts.length >= 2 ? (
-            <WorkflowRunsPage key={parts[1]} name={decodeURIComponent(parts[1])} />
+            <WorkflowRunsPage
+              key={parts[1]}
+              name={decodeURIComponent(parts[1])}
+              executionId={parts.length >= 3 ? decodeURIComponent(parts[2]) : undefined}
+            />
           ) : (
             <WorkflowListPage />
           )
@@ -79,6 +85,7 @@ export function App() {
       case "messages":
         content = (
           <SeededMessagesPage
+            messageId={parts.length >= 2 ? decodeURIComponent(parts[1]) : undefined}
             initialFilters={{
               entityType: route.params.get("entityType") ?? undefined,
               entityId: route.params.get("entityId") ?? undefined,

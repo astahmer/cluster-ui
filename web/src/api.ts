@@ -195,9 +195,20 @@ export function getCluster(): string | null {
   }
 }
 
+const clusterListeners = new Set<(cluster: string | null) => void>()
+
+/** Subscribe to cluster changes (same-tab + cross-tab). Returns an unsubscribe fn. */
+export function onClusterChange(fn: (cluster: string | null) => void): () => void {
+  clusterListeners.add(fn)
+  return () => {
+    clusterListeners.delete(fn)
+  }
+}
+
 export function setCluster(name: string | null) {
   if (name === null) localStorage.removeItem(CLUSTER_KEY)
   else localStorage.setItem(CLUSTER_KEY, name)
+  for (const fn of clusterListeners) fn(name)
 }
 
 /** fired when any API response comes back 401 — the shell shows a login gate */

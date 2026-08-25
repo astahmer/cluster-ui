@@ -77,7 +77,14 @@ export interface MessagesInitialFilters {
 
 /* -------------------------------------------------------------------- page -- */
 
-export function MessagesPage({ initialFilters }: { initialFilters?: MessagesInitialFilters }) {
+export function MessagesPage({
+  initialFilters,
+  messageId
+}: {
+  initialFilters?: MessagesInitialFilters
+  /** deep link #/messages/<id> — the detail panel hydrates from this */
+  messageId?: string
+}) {
   const [data, setData] = React.useState<{ rows: Message[]; total: number } | null>(null)
 
   const initialTab = initialFilters?.failed === "true" ? "failed" : (initialFilters?.status ?? "")
@@ -92,8 +99,24 @@ export function MessagesPage({ initialFilters }: { initialFilters?: MessagesInit
   const [pageSize, setPageSize] = React.useState(50)
   const [sort, setSort] = React.useState<"id" | "deliverAt">("id")
   const [page, setPage] = React.useState(1)
-  const [openId, setOpenId] = React.useState<string | null>(null)
+  const [openId, setOpenIdState] = React.useState<string | null>(messageId ?? null)
   const [actionError, setActionError] = React.useState<string | null>(null)
+
+  // open/close writes the hash so panels are addressable URLs (UX review P1-1);
+  // back/forward + external hash edits stay in sync via the messageId prop.
+  const setOpenId = React.useCallback((id: string | null) => {
+    setOpenIdState(id)
+    const raw = window.location.hash.slice(1) || "/messages"
+    const qIdx = raw.indexOf("?")
+    const params = new URLSearchParams(qIdx === -1 ? "" : raw.slice(qIdx + 1))
+    if (id !== null) params.set("msg", id)
+    else params.delete("msg")
+    const qs = params.toString()
+    window.location.hash = `/messages${id !== null ? `/${encodeURIComponent(id)}` : ""}${qs ? `?${qs}` : ""}`
+  }, [])
+  React.useEffect(() => {
+    setOpenIdState(messageId ?? null)
+  }, [messageId])
   const [selected, setSelected] = React.useState<Set<string>>(new Set())
 
   const config = useAppConfig()

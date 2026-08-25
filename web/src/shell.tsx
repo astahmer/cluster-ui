@@ -1,6 +1,6 @@
 import * as React from "react"
 import { SquaresFour, Cpu, GridFour, Cube, ClockCounterClockwise, FlowArrow, ListDashes, CirclesThree, List, Stack, Sparkle, Plugs, MagnifyingGlass, QueueIcon } from "@phosphor-icons/react"
-import { api } from "./api.ts"
+import { api, getCluster, onClusterChange, setCluster } from "./api.ts"
 import * as live from "./live.ts"
 import { useFreshness } from "./freshness.ts"
 import { inputVariants } from "./kumo"
@@ -38,6 +38,38 @@ export function useRoute(): Route {
 
 export function navigate(path: string) {
   window.location.hash = path
+}
+
+/**
+ * Current cluster (localStorage-backed) as reactive state; updates on
+ * same-tab setCluster() calls and cross-tab storage events.
+ */
+export function useCluster(): string | null {
+  const [cluster, setState] = React.useState<string | null>(getCluster)
+  React.useEffect(() => {
+    const off = onClusterChange(setState)
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === "cluster_ui_cluster") setState(e.newValue)
+    }
+    window.addEventListener("storage", onStorage)
+    return () => {
+      off()
+      window.removeEventListener("storage", onStorage)
+    }
+  }, [])
+  return cluster
+}
+
+/** Set a single query param on the current hash path without navigating. */
+function replaceHashParam(key: string, value: string | null) {
+  const raw = window.location.hash.slice(1) || "/overview"
+  const qIdx = raw.indexOf("?")
+  const path = qIdx === -1 ? raw : raw.slice(0, qIdx)
+  const params = new URLSearchParams(qIdx === -1 ? "" : raw.slice(qIdx + 1))
+  if (value === null || value === "") params.delete(key)
+  else params.set(key, value)
+  const qs = params.toString()
+  window.history.replaceState(null, "", `#${path}${qs ? `?${qs}` : ""}`)
 }
 
 export interface LinkProps extends React.AnchorHTMLAttributes<HTMLAnchorElement> {
@@ -129,7 +161,7 @@ function TopBar({ base, onMenu, onOpenPalette }: { base: string; onMenu: () => v
   void base
   const [paused, togglePausedState] = live.usePaused()
   const [clusters, setClusters] = React.useState<string[]>([])
-  const [cluster, setClusterState] = React.useState<string | null>(null)
+  const cluster = useCluster()
 
   React.useEffect(() => {
     api
@@ -137,21 +169,31 @@ function TopBar({ base, onMenu, onOpenPalette }: { base: string; onMenu: () => v
       .then((cfg) => {
         if (cfg.clusters.length > 1) {
           setClusters(cfg.clusters)
-          const stored = localStorage.getItem("cluster_ui_cluster")
-          setClusterState(stored && cfg.clusters.includes(stored) ? stored : cfg.clusters[0])
+          // a shared/bookmarked link carries ?cluster= in the hash — adopt it
+          // (UX review P1-2); otherwise keep the stored choice, else first.
+          const fromHash = new URLSearchParams(
+            window.location.hash.split("?")[1] ?? ""
+          ).get("cluster")
+          const stored = getCluster()
+          if (fromHash && cfg.clusters.includes(fromHash)) {
+            if (fromHash !== stored) {
+              setCluster(fromHash)
+              live.triggerRefresh()
+            }
+            replaceHashParam("cluster", fromHash)
+          } else if (!stored || !cfg.clusters.includes(stored)) {
+            setCluster(cfg.clusters[0])
+            replaceHashParam("cluster", cfg.clusters[0])
+          }
         }
       })
       .catch(() => {})
   }, [])
 
-  // keep in sync when another tab changes it
+  // keep the hash param in sync so URLs are shareable per-cluster
   React.useEffect(() => {
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === "cluster_ui_cluster") setClusterState(e.newValue)
-    }
-    window.addEventListener("storage", onStorage)
-    return () => window.removeEventListener("storage", onStorage)
-  }, [])
+    if (clusters.length > 1 && cluster !== null) replaceHashParam("cluster", cluster)
+  }, [clusters, cluster])
 
   const pickTheme = () => {
     const next =
@@ -190,8 +232,7 @@ function TopBar({ base, onMenu, onOpenPalette }: { base: string; onMenu: () => v
           className={cn(inputVariants({ size: "xs" }), "h-7 cursor-pointer")}
           value={cluster ?? clusters[0]}
           onChange={(e) => {
-            localStorage.setItem("cluster_ui_cluster", e.target.value)
-            setClusterState(e.target.value)
+            setCluster(e.target.value)
             live.triggerRefresh()
           }}
         >

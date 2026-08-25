@@ -10,7 +10,8 @@ import { createChatRuntime } from "../agent/runtime/create-chat-runtime.ts"
 import type { MessagePart, ToolInvocationMessagePart } from "../agent/protocol/parts.ts"
 import type { ChatMessage } from "../agent/protocol/messages.ts"
 import { Badge, Button, Input, Select } from "../components/ui.tsx"
-import { ErrorNote, PageHeader } from "../shell.tsx"
+import { api, getCluster } from "../api.ts"
+import { ErrorNote, PageHeader, useCluster } from "../shell.tsx"
 import { Card, CardContent } from "../components/ui.tsx"
 import { Empty } from "../kumo"
 import { JsonBlock } from "../components/pieces.tsx"
@@ -63,12 +64,14 @@ const kvStorage = (key: string) => ({
 function makeAgentFetch(config: AgentConfig): typeof globalThis.fetch {
   return async (_input, init) => {
     const parsed = init?.body ? JSON.parse(String(init.body)) : {}
+    // an unset agent picker follows the global TopBar cluster (UX review P1-2)
+    const cluster = config.cluster || getCluster() || ""
     const merged = {
       ...parsed,
       provider: config.provider,
       apiKey: config.apiKey,
       model: config.model || MODEL_PLACEHOLDERS[config.provider],
-      ...(config.cluster ? { cluster: config.cluster } : {})
+      ...(cluster ? { cluster } : {})
     }
     return fetch("/api/agent/stream", {
       method: "POST",
@@ -99,6 +102,8 @@ const noopPersistence = {
 
 export function AgentPage() {
   const [config, setConfig] = React.useState<AgentConfig>(loadConfig)
+  // an unset agent picker follows the global TopBar cluster (UX review P1-2)
+  const globalCluster = useCluster()
   const saveConfig = (patch: Partial<AgentConfig>) => {
     setConfig((c) => {
       const next = { ...c, ...patch }
@@ -141,7 +146,7 @@ export function AgentPage() {
         },
         model: { model: config.model || MODEL_PLACEHOLDERS[config.provider] }
       }),
-    [config.provider, config.apiKey, config.model, config.cluster]
+    [config.provider, config.apiKey, config.model, config.cluster, globalCluster]
   )
 
   return (
@@ -154,15 +159,15 @@ export function AgentPage() {
 function ClusterPicker({ cluster, onPick }: { cluster: string; onPick: (c: string) => void }) {
   const [clusters, setClusters] = React.useState<string[]>([])
   React.useEffect(() => {
-    fetch("/api/config")
-      .then((r) => r.json())
-      .then((cfg: { clusters: string[] }) => setClusters(cfg.clusters ?? []))
+    api
+      .config()
+      .then((cfg) => setClusters((cfg as { clusters?: string[] }).clusters ?? []))
       .catch(() => {})
   }, [])
   if (clusters.length <= 1) return null
   return (
     <Select aria-label="cluster" value={cluster} onChange={(e) => onPick(e.target.value)}>
-      <option value="">default cluster</option>
+      <option value="">follow topbar cluster</option>
       {clusters.map((c) => (
         <option key={c} value={c}>
           {c}
@@ -180,6 +185,7 @@ function AgentPageBody({
   saveConfig: (patch: Partial<AgentConfig>) => void
 }) {
   const actions = useChatActions()
+  const globalCluster = useCluster()
   const messages = useChatSelector((s) => s.activeThread.messages)
   const draft = useChatSelector((s) => s.composer.text)
   const isStreaming = useChatSelector((s) => s.activeThread.isStreaming)
@@ -230,7 +236,7 @@ function AgentPageBody({
             icon={<Sparkle className="h-8 w-8 text-kumo-subtle" />}
             title="Ask about your cluster"
             description={`Try "what failed in the last hour?" or "retry message <id>". Tools run against ${
-              config.cluster || "the default cluster"
+              config.cluster || globalCluster || "the default cluster"
             }; write actions respect read-only mode.`}
           />
         )}

@@ -175,6 +175,13 @@ async function runVariant(label, clusterParam) {
     await page.waitForTimeout(1500)
     check(`[${label}] message detail opens without crash`, errors.length === 0)
     if (errors.length > 0) console.log("   ", errors.slice(0, 3))
+    // P1-1: opening a message writes #/messages/<id>; reloading it rehydrates the panel
+    const msgHash = await page.evaluate(() => window.location.hash)
+    check(`[${label}] message detail deep-link hash`, /^#\/messages\/[^/?]+/.test(msgHash) && !msgHash.startsWith("#/messages/?"))
+    await goto(msgHash.slice(1), 1800)
+    check(`[${label}] message detail hydrates from URL`, (await page.locator(".fixed.inset-0").count()) > 0)
+    await page.keyboard.press("Escape")
+    await page.waitForTimeout(400)
   } else {
     check(`[${label}] messages rows present`, false)
   }
@@ -192,6 +199,18 @@ async function runVariant(label, clusterParam) {
   if ((await wfLink.count()) > 0) {
     await wfLink.click()
     await page.waitForTimeout(1500)
+    // P1-1: run modal is addressable as #/workflows/<name>/<executionId>
+    const runRow = page.locator("table tbody tr").first()
+    if ((await runRow.count()) > 0) {
+      await runRow.click()
+      await page.waitForTimeout(1200)
+      const runHash = await page.evaluate(() => window.location.hash)
+      check(`[${label}] workflow-run deep-link hash`, /^#\/workflows\/[^/]+\//.test(runHash))
+      await goto(runHash.slice(1), 1800)
+      check(`[${label}] workflow-run hydrates from URL`, (await page.locator(".fixed.inset-0").count()) > 0)
+      await page.keyboard.press("Escape")
+      await page.waitForTimeout(400)
+    }
     const dagButton = page.locator("button", { hasText: "DAG" }).first()
     if ((await dagButton.count()) > 0) {
       await dagButton.click()

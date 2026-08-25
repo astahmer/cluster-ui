@@ -5,7 +5,14 @@
 > P2-8, P1-6a (SortableTh as real button), P1-16 (agent chat error surface wired to
 > ChatState.error), P2-12 (live.ts uses eventsUrl()), P1-4 (reset-activity button in
 > message detail for Workflow/* entities), P1-8 (✕ overload replaced with Phosphor
-> Trash/XCircle in Messages). Remaining open items keep their original text.
+> Trash/XCircle in Messages).
+>
+> Batch 3a: **P1-1 [fixed]** — message detail is addressable as `#/messages/<id>` and the
+> workflow-run modal as `#/workflows/<name>/<executionId>`; open/close writes the hash
+> (Back closes), reload/share rehydrates the panel; covered in browser-e2e. **P1-2 [fixed]**
+> — the selected cluster mirrors into the hash as `?cluster=` (shared/bookmarked links
+> adopt it on boot), TopBar select is backed by a setCluster pub/sub, and the Agent page's
+> second picker now follows the global cluster when unset ("follow topbar cluster").
 
 ---
 
