@@ -29,11 +29,28 @@
     },
     {
       "label": "dev (web + server)",
-      "dependsOn": ["dev:web", "dev:server"],
+      "dependsOn": [
+        "dev:web",
+        "dev:server"
+      ],
       "problemMatcher": [],
       "group": {
         "kind": "build",
         "isDefault": true
+      }
+    },
+    {
+      "label": "try redis UI",
+      "type": "shell",
+      "command": "pnpm try:redis",
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "group": "dev",
+        "reveal": "always"
+      },
+      "runOptions": {
+        "reveal": "always"
       }
     }
   ]
