@@ -24,3 +24,9 @@ const Main = app.pipe(
 )
 
 NodeRuntime.runMain(Main)
+
+// Exit abruptly on signals: letting node unwind naturally finalizes
+// better-sqlite3 Statements during GC after env teardown, which trips a
+// native assertion (RemoveEnvironmentCleanupHook) under watch restarts.
+process.on("SIGINT", () => process.exit(0))
+process.on("SIGTERM", () => process.exit(0))

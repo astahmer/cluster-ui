@@ -1,0 +1,40 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "dev:web",
+      "type": "shell",
+      "command": "pnpm dev:web",
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "group": "dev"
+      },
+      "runOptions": {
+        "reveal": "always"
+      }
+    },
+    {
+      "label": "dev:server",
+      "type": "shell",
+      "command": "pnpm dev:server",
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "group": "dev"
+      },
+      "runOptions": {
+        "reveal": "always"
+      }
+    },
+    {
+      "label": "dev (web + server)",
+      "dependsOn": ["dev:web", "dev:server"],
+      "problemMatcher": [],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    }
+  ]
+}
