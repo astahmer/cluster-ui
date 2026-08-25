@@ -27,6 +27,7 @@
     "@opentelemetry/semantic-conventions": "^1.33.0",
     "@parcel/watcher": "^2.5.1",
     "@phosphor-icons/react": "^2.1.10",
+    "@xyflow/react": "12.8.6",
     "ai": "7.0.77",
     "better-sqlite3": "^12.2.0",
     "class-variance-authority": "^0.7.1",
@@ -45,6 +46,7 @@
     "undici": "^7.10.0",
     "uuid": "^11.0.3",
     "ws": "^8.18.2",
+    "xstate": "5.32.5",
     "zod": "4.4.3"
   },
   "devDependencies": {

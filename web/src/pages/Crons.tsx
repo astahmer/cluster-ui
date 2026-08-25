@@ -5,7 +5,7 @@ import { fmtCountdown, fmtTime, relTime } from "../format.ts"
 import { ErrorNote, PageHeader, usePolling } from "../shell.tsx"
 import { ClockCounterClockwise } from "@phosphor-icons/react"
 import { Empty } from "../kumo"
-import { SkeletonTable } from "../components/pieces.tsx"
+import { FilterChip, SkeletonTable, SortableTh, STICKY_TH, useHashParam, useSort } from "../components/pieces.tsx"
 
 function statusToneFor(status: CronJob["lastStatus"]) {
   switch (status) {
@@ -24,20 +24,46 @@ function statusToneFor(status: CronJob["lastStatus"]) {
 
 export function CronsPage() {
   const [rows, setRows] = React.useState<CronJob[]>([])
+  const [overdueOnlyParam, setOverdueOnly] = useHashParam("overdue")
+  const overdueOnly = overdueOnlyParam === "1"
+  const setOverdueOnlyParam = (v: boolean) => setOverdueOnly(v ? "1" : "")
   const { loading, error, refresh } = usePolling(async () => setRows(await api.crons()))
+  const sort = useSort<CronJob>()
 
   if (loading && rows.length === 0) return <SkeletonTable />
 
   const overdue = (c: CronJob) =>
     c.lastStatus !== "done" && c.nextRunAt !== null && c.nextRunAt < Date.now()
 
+  const visible = overdueOnly ? rows.filter(overdue) : rows
+
   return (
     <div>
       <PageHeader
         title="Crons"
         subtitle="scheduled ClusterCron jobs — next delivery derived from stored deliver_at"
-      />
+      >
+        <label className="flex cursor-pointer items-center gap-1.5 text-[12px] text-kumo-subtle">
+          <input
+            type="checkbox"
+            checked={overdueOnly}
+            onChange={(e) => setOverdueOnlyParam(e.target.checked)}
+          />
+          overdue only
+        </label>
+      </PageHeader>
       <ErrorNote error={error} onRetry={refresh} />
+      {(overdueOnly || sort.sortKey !== null) && (
+        <div className="mb-2 flex items-center gap-1.5">
+          {overdueOnly && <FilterChip label="overdue only" onRemove={() => setOverdueOnlyParam(false)} />}
+          {sort.sortKey !== null && (
+            <FilterChip
+              label={`sort: ${sort.sortKey} ${sort.dir === "asc" ? "▲" : "▼"}`}
+              onRemove={() => sort.toggle(sort.sortKey!)}
+            />
+          )}
+        </div>
+      )}
       {rows.length === 0 ? (
         <Empty
           icon={<ClockCounterClockwise className="h-8 w-8 text-kumo-subtle" />}
@@ -46,19 +72,19 @@ export function CronsPage() {
           commandLine="entity types named ClusterCron/<name>"
           className="rounded-lg border border-kumo-line bg-kumo-base"
         />
-      ) : (
+      ) : visible.length > 0 ? (
         <div className="overflow-hidden rounded-lg border border-kumo-line bg-kumo-base">
           <Table>
             <THead>
               <TR>
-                <TH>Name</TH>
-                <TH>Last run</TH>
-                <TH>Next run</TH>
-                <TH>Last status</TH>
+                <SortableTh label="Name" sortKey="name" sort={sort} />
+                <SortableTh label="Last run" sortKey="lastRunAt" sort={sort} />
+                <SortableTh label="Next run" sortKey="nextRunAt" sort={sort} />
+                <TH className={STICKY_TH}>Last status</TH>
               </TR>
             </THead>
             <TBody>
-              {rows.map((c) => (
+              {sort.sorted(visible).map((c) => (
                 <TR key={c.entityType} className={overdue(c) ? "bg-kumo-danger-tint/50" : undefined}>
                   <TD className="font-medium">{c.name}</TD>
                   <TD className="whitespace-nowrap text-kumo-subtle" title={fmtTime(c.lastRunAt)}>
@@ -78,6 +104,10 @@ export function CronsPage() {
               ))}
             </TBody>
           </Table>
+        </div>
+      ) : (
+        <div className="rounded-lg border border-kumo-line bg-kumo-base px-4 py-8 text-center text-[13px] text-kumo-subtle">
+          no cron jobs match the current filters
         </div>
       )}
       {rows.some(overdue) && (

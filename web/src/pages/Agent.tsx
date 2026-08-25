@@ -1,18 +1,27 @@
 import * as React from "react"
 import { PaperPlaneRight, StopCircle, Sparkle } from "@phosphor-icons/react"
-import { useChat } from "@ai-sdk/react"
-import { DefaultChatTransport, type UIMessage } from "ai"
+import {
+  ChatProvider,
+  useChatActions,
+  useChatRuntime,
+  useChatSelector,
+} from "../agent/react-hooks.ts"
+import { createChatRuntime } from "../agent/runtime/create-chat-runtime.ts"
+import type { MessagePart, ToolInvocationMessagePart } from "../agent/protocol/parts.ts"
+import type { ChatMessage } from "../agent/protocol/messages.ts"
 import { Badge, Button, Input, Select } from "../components/ui.tsx"
 import { ErrorNote, PageHeader } from "../shell.tsx"
-import { Card, CardContent, CardHeader, CardTitle } from "../components/ui.tsx"
+import { Card, CardContent } from "../components/ui.tsx"
 import { Empty } from "../kumo"
 import { JsonBlock } from "../components/pieces.tsx"
 
 /**
  * Agent page — chat with a model that has live cluster tools mounted
- * (docs/ROADMAP.md §5). BYOK: the key stays in localStorage and is sent per
- * request in the body; the server never persists it. The same tools are also
- * exposed machine-to-machine at POST /mcp.
+ * (docs/ROADMAP.md §5), running on the vendored @emi/core chat runtime
+ * (temporary threads only — nothing persisted, per decision).
+ *
+ * BYOK: provider/key/model live in localStorage and are injected into each
+ * request body by the transport fetch shim; the server never persists them.
  */
 
 interface AgentConfig {
@@ -24,6 +33,13 @@ interface AgentConfig {
 
 const CONFIG_KEY = "cluster_ui_agent"
 
+const DEFAULTS: AgentConfig = {
+  provider: "openai",
+  apiKey: "",
+  model: "",
+  cluster: ""
+}
+
 function loadConfig(): AgentConfig {
   try {
     const raw = localStorage.getItem(CONFIG_KEY)
@@ -32,40 +48,54 @@ function loadConfig(): AgentConfig {
   return DEFAULTS
 }
 
-const DEFAULTS: AgentConfig = {
-  provider: "openai",
-  apiKey: "",
-  model: "",
-  cluster: ""
-}
-
 const MODEL_PLACEHOLDERS = {
   openai: "gpt-4.1-mini",
   anthropic: "claude-haiku-4-5"
 }
 
-/** deep-link chips for known tools so answers jump straight into the pages */
-function deepLinkFor(toolName: string, input: unknown): { label: string; href: string } | null {
-  const inp = (input ?? {}) as Record<string, unknown>
-  switch (toolName) {
-    case "query_messages":
-    case "get_message":
-      return { label: "open in Messages", href: `#/messages?q=${encodeURIComponent(String(inp.id ?? inp.q ?? ""))}` }
-    case "get_workflow_run":
-      return {
-        label: "open run",
-        href: `#/workflows/${encodeURIComponent(String(inp.name ?? ""))}/${encodeURIComponent(String(inp.executionId ?? ""))}`
-      }
-    case "list_crons":
-      return { label: "open Crons", href: "#/crons" }
-    case "list_singletons":
-      return { label: "open Singletons", href: "#/singletons" }
-    case "list_traces":
-      return { label: "open Traces", href: "#/traces" }
-    default:
-      return null
+const kvStorage = (key: string) => ({
+  get: (_k: string) => localStorage.getItem(key),
+  set: (_k: string, value: string) => localStorage.setItem(key, value),
+  remove: (_k: string) => localStorage.removeItem(key)
+})
+
+/** transport fetch shim: retarget every runtime request at our agent stream */
+function makeAgentFetch(config: AgentConfig): typeof globalThis.fetch {
+  return async (_input, init) => {
+    const parsed = init?.body ? JSON.parse(String(init.body)) : {}
+    const merged = {
+      ...parsed,
+      provider: config.provider,
+      apiKey: config.apiKey,
+      model: config.model || MODEL_PLACEHOLDERS[config.provider],
+      ...(config.cluster ? { cluster: config.cluster } : {})
+    }
+    return fetch("/api/agent/stream", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(merged)
+    })
   }
 }
+
+/** persistence stays out of scope for now (temporary threads only) */
+const noopPersistence = {
+  listConversations: async () => [],
+  loadConversation: async () => {
+    throw new Error("persistence disabled")
+  },
+  reviseConversationMessage: async () => {},
+  updateConversation: async () => {
+    throw new Error("persistence disabled")
+  },
+  deleteConversation: async () => {},
+  cloneConversation: async () => {
+    throw new Error("persistence disabled")
+  },
+  compactConversation: async () => {
+    throw new Error("persistence disabled")
+  }
+} as never
 
 export function AgentPage() {
   const [config, setConfig] = React.useState<AgentConfig>(loadConfig)
@@ -79,37 +109,84 @@ export function AgentPage() {
     })
   }
 
-  // transport re-created when config changes so body resolver reads fresh values
-  const transport = React.useMemo(
+  // rebuild when BYOK config changes so the transport shim reads fresh values
+  const runtime = React.useMemo(
     () =>
-      new DefaultChatTransport({
-        api: "/api/agent/stream",
-        body: () => ({
-          provider: config.provider,
-          apiKey: config.apiKey,
-          model: config.model,
-          cluster: config.cluster || undefined
-        })
+      createChatRuntime({
+        transport: {
+          baseUrl: "/api/agent",
+          fetch: makeAgentFetch(config),
+          streamInactivityTimeoutMilliseconds: 5 * 60 * 1000
+        },
+        persistence: noopPersistence,
+        storage: {
+          settings: kvStorage("cluster_ui_agent_settings"),
+          drafts: kvStorage("cluster_ui_agent_draft")
+        },
+        browser: {
+          online: typeof navigator === "undefined" ? true : navigator.onLine,
+          subscribeOnline: (listener) => {
+            const handler = () => listener(navigator.onLine)
+            window.addEventListener("online", handler)
+            window.addEventListener("offline", handler)
+            return () => {
+              window.removeEventListener("online", handler)
+              window.removeEventListener("offline", handler)
+            }
+          }
+        },
+        identity: {
+          createId: () => crypto.randomUUID(),
+          now: () => new Date().toISOString()
+        },
+        model: { model: config.model || MODEL_PLACEHOLDERS[config.provider] }
       }),
     [config.provider, config.apiKey, config.model, config.cluster]
   )
 
-  const { messages, sendMessage, status, error, stop } = useChat({
-    transport,
-    onFinish: () => {},
-    onError: () => {}
-  })
-  void error
+  return (
+    <ChatProvider runtime={runtime}>
+      <AgentPageBody config={config} saveConfig={saveConfig} />
+    </ChatProvider>
+  )
+}
 
-  const [draft, setDraft] = React.useState("")
-  const streaming = status === "streaming" || status === "submitted"
+function ClusterPicker({ cluster, onPick }: { cluster: string; onPick: (c: string) => void }) {
+  const [clusters, setClusters] = React.useState<string[]>([])
+  React.useEffect(() => {
+    fetch("/api/config")
+      .then((r) => r.json())
+      .then((cfg: { clusters: string[] }) => setClusters(cfg.clusters ?? []))
+      .catch(() => {})
+  }, [])
+  if (clusters.length <= 1) return null
+  return (
+    <Select aria-label="cluster" value={cluster} onChange={(e) => onPick(e.target.value)}>
+      <option value="">default cluster</option>
+      {clusters.map((c) => (
+        <option key={c} value={c}>
+          {c}
+        </option>
+      ))}
+    </Select>
+  )
+}
+
+function AgentPageBody({
+  config,
+  saveConfig
+}: {
+  config: AgentConfig
+  saveConfig: (patch: Partial<AgentConfig>) => void
+}) {
+  const actions = useChatActions()
+  const messages = useChatSelector((s) => s.activeThread.messages)
+  const draft = useChatSelector((s) => s.composer.text)
+  const isStreaming = useChatSelector((s) => s.activeThread.isStreaming)
 
   const send = () => {
-    const text = draft.trim()
-    if (!text || streaming) return
     if (!config.apiKey.trim()) return
-    setDraft("")
-    void sendMessage({ text })
+    actions.sendMessage({ text: draft })
   }
 
   return (
@@ -153,17 +230,17 @@ export function AgentPage() {
             }; write actions respect read-only mode.`}
           />
         )}
-        {messages.map((m) => (
+        {messages.map((m: ChatMessage) => (
           <MessageBubble key={m.id} message={m} />
         ))}
-        {streaming && (
+        {isStreaming && (
           <div className="text-[12px] text-kumo-inactive" data-testid="agent-streaming">
             thinking…
           </div>
         )}
       </div>
 
-      <ErrorNote error={error ? String(error.message ?? error) : null} />
+      <ErrorNote error={null} />
 
       {/* composer */}
       <div className="mt-3 flex shrink-0 items-end gap-2">
@@ -173,7 +250,7 @@ export function AgentPage() {
           className="w-full resize-y rounded-md border border-kumo-line bg-kumo-base px-3 py-2 text-[13px] outline-none focus:border-kumo-brand"
           placeholder={config.apiKey ? "ask anything about the cluster…" : "set an API key above first"}
           value={draft}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={(e) => actions.setDraft({ text: e.target.value })}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault()
@@ -181,8 +258,8 @@ export function AgentPage() {
             }
           }}
         />
-        {streaming ? (
-          <Button variant="secondary" onClick={() => stop()} aria-label="stop generation">
+        {isStreaming ? (
+          <Button variant="secondary" onClick={() => actions.stop()} aria-label="stop generation">
             <StopCircle className="h-4 w-4" /> Stop
           </Button>
         ) : (
@@ -195,28 +272,7 @@ export function AgentPage() {
   )
 }
 
-function ClusterPicker({ cluster, onPick }: { cluster: string; onPick: (c: string) => void }) {
-  const [clusters, setClusters] = React.useState<string[]>([])
-  React.useEffect(() => {
-    fetch("/api/config")
-      .then((r) => r.json())
-      .then((cfg: { clusters: string[] }) => setClusters(cfg.clusters ?? []))
-      .catch(() => {})
-  }, [])
-  if (clusters.length <= 1) return null
-  return (
-    <Select aria-label="cluster" value={cluster} onChange={(e) => onPick(e.target.value)}>
-      <option value="">default cluster</option>
-      {clusters.map((c) => (
-        <option key={c} value={c}>
-          {c}
-        </option>
-      ))}
-    </Select>
-  )
-}
-
-type AgentUIMessage = UIMessage
+type AgentUIMessage = ChatMessage
 
 function MessageBubble({ message }: { message: AgentUIMessage }) {
   const isUser = message.role === "user"
@@ -227,86 +283,51 @@ function MessageBubble({ message }: { message: AgentUIMessage }) {
           isUser ? "bg-kumo-brand/15 text-kumo-default" : "border border-kumo-line bg-kumo-base"
         }`}
       >
-        {message.parts.map((part, i) => (
-          <MessagePart key={i} part={part} />
+        {message.parts.map((part: MessagePart, i: number) => (
+          <MessagePartView key={i} part={part} />
         ))}
       </div>
     </div>
   )
 }
 
-function MessagePart({ part }: { part: AgentUIMessage["parts"][number] }) {
+function MessagePartView({ part }: { part: MessagePart }) {
   if (part.type === "text") {
     return <p className="whitespace-pre-wrap">{part.text}</p>
   }
-  if (part.type.startsWith("tool-")) {
-    const p = part as unknown as ToolUIPartLike
-    return <ToolCard name={p.type.slice(5)} state={p.state} input={p.input} output={p.output} errorText={p.errorText} />
+  if (part.type === "tool-invocation") {
+    return <ToolCard part={part} />
   }
-  // step markers / files / reasoning — render nothing for now
   return null
 }
 
-interface ToolUIPartLike {
-  type: string
-  state: string
-  input?: unknown
-  output?: unknown
-  errorText?: string
-}
-
-function ToolCard({
-  name,
-  state,
-  input,
-  output,
-  errorText
-}: {
-  name: string
-  state: string
-  input?: unknown
-  output?: unknown
-  errorText?: string
-}) {
+function ToolCard({ part }: { part: ToolInvocationMessagePart }) {
   const [open, setOpen] = React.useState(false)
-  const link = deepLinkFor(name, input)
-  const isError = state === "output-error" || Boolean(errorText)
-  const tone = isError ? "err" : state === "output-available" ? "ok" : "info"
+  const isError = part.state === "output-error"
+  const tone = isError ? "err" : part.state === "output-available" ? "ok" : "info"
   const stateLabel =
-    state === "input-streaming" || state === "input-available" ?
-      "running" :
-      state === "output-error" ?
-      "failed" :
-      "done"
+    part.state === "input-available" ? "running" : part.state === "output-error" ? "failed" : "done"
   return (
     <div className="my-1.5 rounded-md border border-kumo-line bg-kumo-canvas/60 p-2">
-      <div className="flex items-center justify-between gap-2">
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          className="flex cursor-pointer items-center gap-2 font-mono text-[12px]"
-        >
-          <Badge tone={tone as "ok" | "err" | "info"}>{stateLabel}</Badge>
-          <span>{name}()</span>
-        </button>
-        <div className="flex items-center gap-2">
-          {link && (
-            <a href={link.href} className="text-[11px] text-kumo-link hover:underline">
-              {link.label} →
-            </a>
-          )}
-        </div>
-      </div>
-      {isError && errorText && <div className="mt-1 text-[12px] text-kumo-danger">{errorText}</div>}
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full cursor-pointer items-center gap-2 text-left font-mono text-[12px]"
+      >
+        <Badge tone={tone as "ok" | "err" | "info"}>{stateLabel}</Badge>
+        <span>{part.toolName}()</span>
+        <span className="ml-auto text-[10px] text-kumo-inactive">{open ? "hide" : "details"}</span>
+      </button>
+      {isError && part.errorText && <div className="mt-1 text-[12px] text-kumo-danger">{part.errorText}</div>}
       {open && (
         <div className="mt-2 space-y-2">
           <div>
             <div className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-kumo-subtle">input</div>
-            <JsonBlock value={input ?? null} max={200} />
+            <JsonBlock value={part.input ?? null} max={200} />
           </div>
           <div>
             <div className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-kumo-subtle">output</div>
-            <JsonBlock value={output ?? errorText ?? null} max={400} />
+            <JsonBlock value={part.output ?? part.errorText ?? null} max={400} />
           </div>
         </div>
       )}

@@ -278,7 +278,9 @@ export function makeRedisRepo(url: string): import("./queries.ts").Repo {
     workflowRuns: (_name: string) => allSync([]),
     workflowRun: (_name: string, _executionId: string) => allSync(null),
     traces: (_limit?: number) => allSync([]),
-    trace: (_traceId: string) => allSync([])
+    trace: (_traceId: string) => allSync([]),
+    queues: () => queues(),
+    jobTree: (id: string) => jobTree(id)
   }
 
   // write actions exposed via the same action-handler path need db/prefix —
@@ -309,10 +311,198 @@ export function makeRedisRepo(url: string): import("./queries.ts").Repo {
         ])
       )
       return { ok: true as const }
+    },
+    async pauseQueue(queue: string) {
+      assertWritable(config.readonly)
+      await ready()
+      await withTimeout(redis.lpush(`bull:${queue}:paused`, "1"))
+      return { ok: true as const }
+    },
+    async resumeQueue(queue: string) {
+      assertWritable(config.readonly)
+      await ready()
+      await withTimeout(redis.lrem(`bull:${queue}:paused`, 0, "1"))
+      return { ok: true as const }
+    },
+    async promote(id: string) {
+      assertWritable(config.readonly)
+      const [queue, jobId] = splitId(id)
+      await ready()
+      // BullMQ's promote moves delayed → wait; zrem + lpush is enough for dashboard semantics
+      const removed = await withTimeout(redis.zrem(`bull:${queue}:delayed`, jobId))
+      if (removed === 0) {
+        throw new ActionError(`job ${id} is not delayed`, 400)
+      }
+      await withTimeout(redis.lpush(`bull:${queue}:wait`, jobId))
+      return { ok: true as const }
+    },
+    async clean(
+      queue: string,
+      state: "completed" | "failed",
+      opts: { olderThanMs?: number; count?: number } = {}
+    ) {
+      if (queue === "*") {
+        const names = await scanQueues()
+        let removed = 0
+        for (const q of names) {
+          const r = await actions.clean(q, state, opts)
+          removed += r.removed
+        }
+        return { removed }
+      }
+      assertWritable(config.readonly)
+      await ready()
+      const cap = Math.min(Math.max(opts.count ?? 500, 1), 1000)
+      const maxScore = opts.olderThanMs !== undefined ? Date.now() - opts.olderThanMs : "+inf"
+      // oldest-first up to cap
+      const ids =
+        opts.olderThanMs !== undefined ?
+          await withTimeout(redis.zrangebyscore(`bull:${queue}:${state}`, "-inf", maxScore, "LIMIT", 0, cap)) :
+          (await withTimeout(redis.zrange(`bull:${queue}:${state}`, 0, cap - 1))).slice(0, cap).reverse()
+      let removed = 0
+      for (const jobId of ids) {
+        await withTimeout(
+          Promise.all([
+            redis.del(`bull:${queue}:${jobId}`),
+            redis.del(`bull:${queue}:${jobId}:children`),
+            redis.zrem(`bull:${queue}:${state}`, jobId)
+          ])
+        )
+        removed++
+      }
+      return { removed }
+    },
+    async addJob(queue: string, name: string, data: unknown) {
+      assertWritable(config.readonly)
+      await ready()
+      // minimal BullMQ-compatible job: hash + wait list + id marker set
+      const jobId = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`
+      await withTimeout(
+        Promise.all([
+          redis.hset(`bull:${queue}:${jobId}`, {
+            name,
+            data: JSON.stringify(data ?? null),
+            timestamp: String(Date.now()),
+            attemptsMade: "0",
+            delay: "0",
+            priority: "0"
+          }),
+          redis.lpush(`bull:${queue}:wait`, jobId),
+          redis.sadd(`bull:${queue}:id`, jobId)
+        ])
+      )
+      return { ok: true as const, id: `${queue}:${jobId}` }
     }
   }
 
-  return repo as unknown as import("./queries.ts").Repo & { actions: typeof actions }
+  /** per-queue paused state for the queues listing */
+  const queues = () =>
+    scanQueues().then(async (names) => {
+      const out: Array<{ name: string; paused: boolean }> = []
+      for (const name of names) {
+        const paused = await withTimeout(redis.llen(`bull:${name}:paused`))
+        out.push({ name, paused: paused > 0 })
+      }
+      return out
+    })
+
+  /** parent/child flow tree rooted at the job's root (BullMQ parentKey conventions) */
+  const jobTree = async (id: string): Promise<object | null> => {
+    await ready()
+    const [rootQueue, rootJobId] = splitId(id)
+
+    const fetchRaw = async (queue: string, jobId: string): Promise<Record<string, string> | null> => {
+      const raw = await withTimeout(redis.hgetall(`bull:${queue}:${jobId}`))
+      return raw && Object.keys(raw).length > 0 ? raw : null
+    }
+
+    // walk up to the root via parentKey
+    let queue = rootQueue
+    let jobId = rootJobId
+    for (let depth = 0; depth < 8; depth++) {
+      const raw = await fetchRaw(queue, jobId)
+      if (!raw) break
+      const parentKey = raw.parentKey ?? ""
+      if (!parentKey) break
+      // parentKey = bull:<parentQueue>:<parentId>
+      const parts = parentKey.split(":")
+      if (parts.length < 3 || parts[0] !== "bull") break
+      queue = parts.slice(1, -1).join(":")
+      jobId = parts[parts.length - 1]
+    }
+
+    const buildNode = async (q: string, jid: string, depth: number): Promise<object | null> => {
+      const raw = await fetchRaw(q, jid)
+      if (!raw) return null
+      let state: JobState = "wait"
+      for (const s of STATES) {
+        const member =
+          s === "completed" || s === "failed" || s === "delayed" ?
+            await withTimeout(redis.zscore(`bull:${q}:${s}`, jid)) :
+            null
+        if (member !== null) {
+          state = s
+          break
+        }
+      }
+      const view = toMessageView({
+        queue: q,
+        jobId: jid,
+        state,
+        name: raw.name ?? jid,
+        data: safeParse(raw.data),
+        returnValue: safeParse(raw.returnvalue),
+        failedReason: raw.failedReason || null,
+        attemptsMade: Number(raw.attemptsMade ?? 0),
+        timestamp: raw.timestamp ? Number(raw.timestamp) : null,
+        processedOn: raw.processedOn ? Number(raw.processedOn) : null,
+        finishedOn: raw.finishedOn ? Number(raw.finishedOn) : null
+      })
+      const node: Record<string, unknown> = { job: view, children: [] }
+      if (depth < 8) {
+        const childIds = await withTimeout(redis.smembers(`bull:${q}:${jid}:children`))
+        for (const childId of childIds.slice(0, 50)) {
+          // children live under their own queues; child hash stores its own queue-less key —
+          // BullMQ keeps child jobs in the SAME queue as declared when added
+          const child = await buildNode(q, childId, depth + 1)
+          if (child) (node.children as unknown[]).push(child)
+        }
+      }
+      return node
+    }
+
+    const tree = await buildNode(queue, jobId, 0)
+    return tree
+  }
+
+  function safeParse(v: string | undefined): unknown {
+    try {
+      return JSON.parse(v ?? "null")
+    } catch {
+      return v ?? null
+    }
+  }
+
+  return repo as unknown as import("./queries.ts").Repo & RedisRepoExtras
+}
+
+/** surface api.ts uses for redis-only routes (queues controls, job tree) */
+export interface RedisRepoExtras {
+  actions: {
+    retry: (id: string) => Promise<{ ok: true }>
+    delete: (id: string) => Promise<{ ok: true }>
+    pauseQueue: (queue: string) => Promise<{ ok: true }>
+    resumeQueue: (queue: string) => Promise<{ ok: true }>
+    promote: (id: string) => Promise<{ ok: true }>
+    clean: (
+      queue: string,
+      state: "completed" | "failed",
+      opts?: { olderThanMs?: number; count?: number }
+    ) => Promise<{ removed: number }>
+    addJob: (queue: string, name: string, data: unknown) => Promise<{ ok: true; id: string }>
+  }
+  queues: () => Promise<Array<{ name: string; paused: boolean }>>
+  jobTree: (id: string) => Promise<object | null>
 }
 
 function splitId(id: string): [string, string] {

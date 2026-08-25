@@ -154,7 +154,15 @@ export interface MetricPoint {
 
 export interface AppConfig {
   clusters: string[]
+  clusterKinds?: { name: string; kind: "sqlite" | "redis" }[]
   tracingUrlTemplate: string | null
+}
+
+export interface JobTreeNode {
+  id: string
+  label: string
+  state?: string
+  children?: JobTreeNode[]
 }
 
 /* ------------------------------------------------------- token & clusters -- */
@@ -296,7 +304,41 @@ export interface RunnerReport {
   error?: string
 }
 
+export interface ReporterLogLine {
+  t: number
+  level?: string | null
+  text: string
+}
+
+export interface RunnerLogsReport {
+  address: string
+  lines?: ReporterLogLine[]
+  error?: string
+}
+
+export interface ReporterFiber {
+  id: string
+  name?: string | null
+  status: string
+  startedAt?: number | string | null
+  children?: number | null
+}
+
+export interface RunnerFibersReport {
+  address: string
+  fibers?: ReporterFiber[]
+  error?: string
+}
+
 export const api = {
+  runnerLogs: (cluster?: string) =>
+    get<{ runners: RunnerLogsReport[] }>(
+      "/api/logs" + (cluster ? `?cluster=${encodeURIComponent(cluster)}` : "")
+    ),
+  runnerFibers: (cluster?: string) =>
+    get<{ runners: RunnerFibersReport[] }>(
+      "/api/fibers" + (cluster ? `?cluster=${encodeURIComponent(cluster)}` : "")
+    ),
   overview: () => get<Overview>("/api/overview"),
   runners: () => get<Runner[]>("/api/runners"),
   shards: () => get<Shard[]>("/api/shards"),
@@ -316,6 +358,7 @@ export const api = {
     ),
   crons: () => get<CronJob[]>("/api/crons"),
   traces: () => get<TraceSummary[]>("/api/traces"),
+  jobTree: (id: string) => get<JobTreeNode>(`/api/job-tree/${encodeURIComponent(id)}`),
   trace: (traceId: string) => get<Message[]>(`/api/traces/${encodeURIComponent(traceId)}`),
   singletons: () => get<{ runners: RunnerReport[] }>("/api/singletons"),
   metricsHistory: (opts?: { rangeMs?: number }) =>

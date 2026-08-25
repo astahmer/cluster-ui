@@ -1,6 +1,7 @@
 /* Tailwind first (consumer responsibility, per upstream kumo.css), then the
    vendored kumo design system: tokens (@theme) + component styles. */
 @import "tailwindcss";
+@import "@xyflow/react/dist/style.css";
 @import "./kumo/styles/theme-kumo.css";
 @import "./kumo/styles/kumo.css";
 

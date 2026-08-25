@@ -4,11 +4,12 @@ import { api, type Runner } from "../api.ts"
 import { Badge, Table, TBody, TD, TH, THead, TR } from "../components/ui.tsx"
 import { ErrorNote, PageHeader, useLive } from "../shell.tsx"
 import { Empty } from "../kumo"
-import { SkeletonTable } from "../components/pieces.tsx"
+import { SkeletonTable, SortableTh, useSort } from "../components/pieces.tsx"
 
 export function RunnersPage() {
   const [rows, setRows] = React.useState<Runner[]>([])
   const { loading, error, refresh } = useLive(async () => setRows(await api.runners()))
+  const sort = useSort<Runner>()
 
   if (loading && rows.length === 0) return <SkeletonTable />
   const totalShards = rows.reduce((acc, r) => acc + r.shards, 0)
@@ -25,17 +26,17 @@ export function RunnersPage() {
         <Table>
           <THead>
             <TR>
-              <TH>Address</TH>
-              <TH>Host</TH>
-              <TH>Groups</TH>
-              <TH>Version</TH>
-              <TH className="text-right">Shards</TH>
-              <TH>Status</TH>
-              <TH>Load</TH>
+              <SortableTh label="Address" sortKey="address" sort={sort} />
+              <TH className="sticky top-0 z-10 bg-kumo-base">Host</TH>
+              <TH className="sticky top-0 z-10 bg-kumo-base">Groups</TH>
+              <SortableTh label="Version" sortKey="version" sort={sort} />
+              <SortableTh label="Shards" sortKey="shards" sort={sort} className="text-right" />
+              <TH className="sticky top-0 z-10 bg-kumo-base">Status</TH>
+              <TH className="sticky top-0 z-10 bg-kumo-base">Load</TH>
             </TR>
           </THead>
           <TBody>
-            {rows.map((r) => (
+            {sort.sorted(rows).map((r) => (
               <TR key={r.address}>
                 <TD className="font-medium">
                   {r.address}

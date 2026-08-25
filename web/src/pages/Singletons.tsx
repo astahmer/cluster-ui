@@ -1,9 +1,10 @@
 import * as React from "react"
 import { CirclesThree } from "@phosphor-icons/react"
 import { api, type RunnerReport } from "../api.ts"
+import { RunnerRuntimePanel } from "../components/runner-state.tsx"
 import { Badge, Table, TBody, TD, TH, THead, TR } from "../components/ui.tsx"
-import { ErrorNote, PageHeader, useLive } from "../shell.tsx"
-import { Empty, Tooltip } from "../kumo"
+import { ErrorNote, PageHeader, useRoute, useLive } from "../shell.tsx"
+import { Empty, Tabs, Tooltip } from "../kumo"
 /**
  * Singleton visibility page. Runner-resident state (singletons, in-memory
  * entities) is only visible for runners that mount the optional
@@ -11,8 +12,12 @@ import { Empty, Tooltip } from "../kumo"
  * per-runner error rather than failing the whole view.
  */
 export function SingletonsPage() {
+  const [tab, setTab] = React.useState("state")
   const [runners, setRunners] = React.useState<RunnerReport[]>([])
   const { loading, error, refresh } = useLive(async () => setRunners((await api.singletons()).runners))
+  // cluster param flows through to the runtime fan-out routes too
+  const route = useRoute()
+  const cluster = route.params.get("cluster") ?? undefined
 
   if (loading && runners.length === 0) return null
 
@@ -27,6 +32,18 @@ export function SingletonsPage() {
       />
       <ErrorNote error={error} onRetry={refresh} />
 
+      <Tabs
+        variant="segmented"
+        size="sm"
+        className="mb-3 w-fit"
+        tabs={[
+          { value: "state", label: "State" },
+          { value: "runtime", label: "Runtime" }
+        ]}
+        value={tab}
+        onValueChange={setTab}
+      />
+
       <div className="mb-3 flex flex-wrap items-center gap-2 text-[12px] text-kumo-subtle">
         <Badge tone={reporting.length > 0 ? "ok" : "neutral"}>
           {reporting.length}/{runners.length} runners reporting
@@ -34,7 +51,7 @@ export function SingletonsPage() {
         <Badge tone="accent">{totalSingletons} singletons</Badge>
       </div>
 
-      <div className="rounded-lg border border-kumo-line bg-kumo-base">
+      <div data-tab="state" hidden={tab !== "state"} className="rounded-lg border border-kumo-line bg-kumo-base">
         <Table>
           <THead>
             <TR>
@@ -91,6 +108,10 @@ export function SingletonsPage() {
         <code className="rounded bg-kumo-canvas px-1 py-0.5">@effect/cluster-ui-reporter</code>{" "}
         package in your runner app to make it visible here.
       </p>
+
+      <div className="mt-4" data-tab="runtime" hidden={tab !== "runtime"}>
+        <RunnerRuntimePanel cluster={cluster} />
+      </div>
     </div>
   )
 }

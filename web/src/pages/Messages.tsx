@@ -9,6 +9,7 @@ import {
 } from "../api.ts"
 import { downloadCsv, downloadJson } from "../export.ts"
 import { DetailPanel, SkeletonTable, StatusBadge, statusTone, useMessageDetail } from "../components/pieces.tsx"
+import { FlowGraph, jobTreeToSpecs } from "../components/flow-graph.tsx"
 import { confirmDialog } from "../components/dialogs.tsx"
 import { toast } from "../toast.tsx"
 import { Badge, Button, Input, Select, Table, TBody, TD, TH, THead, TR, cn } from "../components/ui.tsx"
@@ -584,9 +585,21 @@ function MessageDetailBody({
       config.tracingUrlTemplate.replace("{traceId}", encodeURIComponent(m.traceId)) :
       null
 
+  const clusterKind =
+    config?.clusterKinds?.find((c) => {
+      try {
+        const stored = localStorage.getItem("cluster_ui_cluster")
+        return stored ? c.name === stored : c.name === config.clusters[0]
+      } catch {
+        return false
+      }
+    })?.kind ?? "sqlite"
+
   return (
     <div className="space-y-4 text-[13px]" data-testid="message-detail">
       {d.result && <OutcomeBanner result={d.result} />}
+
+      {clusterKind === "redis" && <JobFlowSection messageId={m.id} />}
 
       <section className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg border border-kumo-line bg-kumo-canvas/50 p-3">
         <Field label="Status">
@@ -775,3 +788,32 @@ function shortId(id: string) {
 // re-export for workflow pages
 export { statusTone }
 export type { MessageStatus }
+
+/* ------------------------------------------------------------------ flow --- */
+
+function JobFlowSection({ messageId }: { messageId: string }) {
+  const [tree, setTree] = React.useState<import("../api.ts").JobTreeNode | null>(null)
+  const [error, setError] = React.useState<string | null>(null)
+
+  React.useEffect(() => {
+    let alive = true
+    api
+      .jobTree(messageId)
+      .then((t) => alive && setTree(t))
+      .catch((e) => alive && setError(String(e)))
+    return () => {
+      alive = false
+    }
+  }, [messageId])
+
+  if (error) return null
+  if (!tree) return null
+  return (
+    <section>
+      <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-kumo-subtle">
+        Job flow — parent/child relations
+      </div>
+      <FlowGraph specs={[jobTreeToSpecs(tree)]} height={260} />
+    </section>
+  )
+}

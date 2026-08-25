@@ -258,6 +258,42 @@ async function runChecks() {
   console.log(`${noKeyOk ? "✓" : "✗"} agent stream without key -> 401`)
   if (!noKeyOk) failures++
 
+  // ---- redis-only routes degrade cleanly on sqlite clusters -------------
+  const redisOnlyRoutes: Array<[string, unknown]> = [
+    ["/api/actions/pause-queue", { queue: "mail" }],
+    ["/api/actions/promote", { id: "mail:1" }],
+    ["/api/actions/clean", { queue: "*", state: "completed" }],
+    ["/api/actions/add-job", { queue: "mail", name: "manual", data: { hello: true } }]
+  ]
+  let redisRoutesOk = true
+  for (const [route, payload] of redisOnlyRoutes) {
+    const res = await fetch(`http://127.0.0.1:${PORT}${route}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload)
+    })
+    const body = (await res.json()) as any
+    const ok = res.status === 400 && body.error === "not supported for this cluster type"
+    if (!ok) {
+      redisRoutesOk = false
+      console.log("   ", route, res.status, JSON.stringify(body).slice(0, 120))
+    }
+  }
+  console.log(`${redisRoutesOk ? "✓" : "✗"} redis-only action routes -> clean 400 on sqlite`)
+  if (!redisRoutesOk) failures++
+
+  const queuesRes = await fetch(`http://127.0.0.1:${PORT}/api/queues`)
+  const queuesBody = (await queuesRes.json()) as any
+  const queuesOk = queuesRes.status === 200 && Array.isArray(queuesBody) && queuesBody.length === 0
+  console.log(`${queuesOk ? "✓" : "✗"} GET /api/queues -> [] on sqlite`)
+  if (!queuesOk) failures++
+
+  const treeRes = await fetch(`http://127.0.0.1:${PORT}/api/job-tree/mail%3A1`)
+  const treeBody = (await treeRes.json()) as any
+  const treeOk = treeRes.status === 400 && treeBody.error === "not supported for this cluster type"
+  console.log(`${treeOk ? "✓" : "✗"} GET /api/job-tree -> clean 400 on sqlite`)
+  if (!treeOk) failures++
+
   // ---- redis config parsing + unreachable-redis degradation ------------
   const parsed = parseClusters("demo=redis://localhost:6399,default=./data/cluster.db:cluster")
   const parseOk =

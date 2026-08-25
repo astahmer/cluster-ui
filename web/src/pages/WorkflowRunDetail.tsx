@@ -7,6 +7,7 @@ import {
 } from "../api.ts"
 import { JsonBlock, StatusBadge, statusTone } from "../components/pieces.tsx"
 import { SpanWaterfall, type TimelineSpan } from "../components/timeline.tsx"
+import { FlowGraph, type FlowNodeSpec } from "../components/flow-graph.tsx"
 import { confirmDialog } from "../components/dialogs.tsx"
 import { toast } from "../toast.tsx"
 import { Badge, Button, Card, CardContent, CardHeader, CardTitle } from "../components/ui.tsx"
@@ -104,6 +105,7 @@ export function WorkflowRunPage({
   const canRetry = run.status === "done"
   const canCancel = run.status === "pending" || run.status === "inflight" || run.status === "scheduled"
   const [timelineOpen, setTimelineOpen] = React.useState(true)
+  const [view, setView] = React.useState<"timeline" | "graph">("timeline")
 
   // waterfall spans: run message + its activities on one shared axis; an
   // activity's bar runs until the next event (gaps between events are the signal)
@@ -140,6 +142,28 @@ export function WorkflowRunPage({
     return spans
   }, [run, data.activities, executionId, result])
 
+  // DAG: workflow root -> activity steps (same source data as the waterfall)
+  const flowSpecs = React.useMemo<FlowNodeSpec[]>(() => {
+    if (!run) return []
+    const activities = [...(data.activities as ActivityRow[])].sort((a, b) => a.createdAt - b.createdAt)
+    return [
+      {
+        key: `run-${run.id}`,
+        label: `workflow ${executionId}`,
+        sublabel: `${activities.length} activities`,
+        tone:
+          run.status === "done" ? (result?.outcome === "Failure" ? "danger" : "success") : "warning",
+        children: activities.map((a) => ({
+          key: a.id,
+          label: a.activityName ?? a.tag ?? a.kind,
+          sublabel:
+            typeof a.attempt === "number" && a.attempt > 1 ? `attempt ${a.attempt}` : a.status,
+          tone: a.failed ? ("danger" as const) : a.status === "done" ? ("success" as const) : ("running" as const)
+        }))
+      }
+    ]
+  }, [run, data.activities, executionId, result])
+
   return (
     <div className="space-y-4 text-[13px]">
       {result && (
@@ -158,16 +182,49 @@ export function WorkflowRunPage({
                 className="flex w-full cursor-pointer items-center justify-between text-left"
                 aria-expanded={timelineOpen}
               >
-                <span>Timeline</span>
-                <span className="text-[11px] font-normal text-kumo-subtle">
-                  {timelineOpen ? "hide" : "show"} · {data.activities.length} activities
+                <span>Flow</span>
+                <span className="flex items-center gap-2">
+                  <span className="text-[11px] font-normal text-kumo-subtle">
+                    {data.activities.length} activities
+                  </span>
+                  <span
+                    role="group"
+                    aria-label="flow view"
+                    className="flex overflow-hidden rounded-md border border-kumo-line text-[11px]"
+                  >
+                    <button
+                      type="button"
+                      aria-pressed={view === "graph"}
+                      className={`cursor-pointer px-2 py-0.5 ${view === "graph" ? "bg-kumo-tint text-kumo-default" : "text-kumo-subtle hover:bg-kumo-tint"}`}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setTimelineOpen(true)
+                        setView("graph")
+                      }}
+                    >
+                      DAG
+                    </button>
+                    <button
+                      type="button"
+                      aria-pressed={view === "timeline"}
+                      className={`cursor-pointer px-2 py-0.5 ${view === "timeline" ? "bg-kumo-tint text-kumo-default" : "text-kumo-subtle hover:bg-kumo-tint"}`}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setTimelineOpen(true)
+                        setView("timeline")
+                      }}
+                    >
+                      Timeline
+                    </button>
+                  </span>
+                  <span className="font-normal">{timelineOpen ? "hide" : "show"}</span>
                 </span>
               </button>
             </CardTitle>
           </CardHeader>
           {timelineOpen && (
             <CardContent>
-              <SpanWaterfall spans={timelineSpans} />
+              {view === "graph" ? <FlowGraph specs={flowSpecs} /> : <SpanWaterfall spans={timelineSpans} />}
             </CardContent>
           )}
         </Card>

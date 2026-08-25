@@ -1,5 +1,6 @@
 import * as React from "react"
 import { SkeletonLine } from "../kumo"
+import { TH } from "./ui.tsx"
 import { api, type MessageDetail, type MessageStatus } from "../api.ts"
 import { relTime } from "../format.ts"
 import { Badge, Button, Card, CardContent, CardHeader, CardTitle, cn, type StatusTone } from "./ui.tsx"
@@ -164,5 +165,142 @@ export function SkeletonCards({ count = 4 }: { count?: number }) {
         </div>
       ))}
     </div>
+  )
+}
+
+/* ---------------------- sorting + deep-linkable filters -------------------- */
+
+export type SortDir = "asc" | "desc"
+
+export interface SortState {
+  key: string | null
+  dir: SortDir
+}
+
+/**
+ * Client-side table sorting. No initial state preserves the natural order until
+ * the user clicks a header; toggling cycles asc → desc. Null values always
+ * sort last regardless of direction.
+ *
+ * Usage: `const sort = useSort<Row>()` ... `<SortableTh label="X" sortKey="x" sort={sort} />`
+ * ... `sort.sorted(rows)` wherever rows are rendered.
+ */
+export function useSort<T>(initial: SortState | null = null) {
+  const [sort, setSort] = React.useState<SortState | null>(initial)
+
+  const toggle = React.useCallback((key: string) => {
+    setSort((s) => (s !== null && s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" }))
+  }, [])
+
+  const sorted = React.useCallback(
+    (rows: ReadonlyArray<T>): T[] => {
+      if (!sort?.key) return [...rows]
+      const key = sort.key
+      const dir = sort.dir === "asc" ? 1 : -1
+      return [...rows].sort((a, b) => {
+        const av = (a as Record<string, unknown>)[key]
+        const bv = (b as Record<string, unknown>)[key]
+        if (av == null && bv == null) return 0
+        if (av == null) return 1
+        if (bv == null) return -1
+        if (typeof av === "number" && typeof bv === "number") return (av - bv) * dir
+        return String(av).localeCompare(String(bv)) * dir
+      })
+    },
+    [sort]
+  )
+
+  return { sorted, sortKey: sort?.key ?? null, dir: sort?.dir ?? "asc", toggle }
+}
+
+/** Clickable table header wired to useSort; renders the ▲/▼ indicator. */
+export function SortableTh({
+  label,
+  sortKey,
+  sort,
+  className
+}: {
+  label: React.ReactNode
+  sortKey: string
+  sort: { sortKey: string | null; dir: SortDir; toggle: (key: string) => void }
+  className?: string
+}) {
+  const active = sort.sortKey === sortKey
+  return (
+    <TH
+      className={cn(
+        "sticky top-0 z-10 cursor-pointer select-none bg-kumo-base hover:text-kumo-default",
+        active && "text-kumo-default",
+        className
+      )}
+      onClick={() => sort.toggle(sortKey)}
+      aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}
+      title={`sort by ${typeof label === "string" ? label.toLowerCase() : sortKey}`}
+    >
+      {label}
+      <span className="ml-1 inline-block w-2.5 text-[9px] text-kumo-inactive">
+        {active ? (sort.dir === "asc" ? "▲" : "▼") : ""}
+      </span>
+    </TH>
+  )
+}
+
+/** Sticky-header classes for plain (non-sortable) TH cells. */
+export const STICKY_TH = "sticky top-0 z-10 bg-kumo-base"
+
+/**
+ * Deep-linkable filter state backed by the hash query string (#/path?key=value).
+ * Writes go through history.replaceState so nothing remounts; external hash
+ * changes (nav, back button) stay in sync.
+ */
+export function useHashParam(key: string): [string, (value: string) => void] {
+  const read = React.useCallback(() => {
+    const raw = window.location.hash.slice(1)
+    const q = raw.indexOf("?")
+    if (q === -1) return ""
+    return new URLSearchParams(raw.slice(q + 1)).get(key) ?? ""
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key])
+
+  const [value, setValue] = React.useState(read)
+
+  React.useEffect(() => {
+    const onChange = () => setValue(read())
+    window.addEventListener("hashchange", onChange)
+    return () => window.removeEventListener("hashchange", onChange)
+  }, [read])
+
+  const update = React.useCallback(
+    (next: string) => {
+      const raw = window.location.hash.slice(1) || "/overview"
+      const qIdx = raw.indexOf("?")
+      const path = qIdx === -1 ? raw : raw.slice(0, qIdx)
+      const params = new URLSearchParams(qIdx === -1 ? "" : raw.slice(qIdx + 1))
+      if (next === "") params.delete(key)
+      else params.set(key, next)
+      const qs = params.toString()
+      window.history.replaceState(null, "", `#${path}${qs ? `?${qs}` : ""}`)
+      setValue(next)
+    },
+    [key]
+  )
+
+  return [value, update]
+}
+
+/** Removable chip representing an active URL-backed filter. */
+export function FilterChip({ label, onRemove }: { label: React.ReactNode; onRemove: () => void }) {
+  return (
+    <Badge tone="info" className="inline-flex items-center gap-1">
+      <span>{label}</span>
+      <button
+        type="button"
+        aria-label={`clear filter ${typeof label === "string" ? label : ""}`.trim()}
+        onClick={onRemove}
+        className="cursor-pointer px-0.5 text-[11px] leading-none opacity-70 hover:opacity-100"
+      >
+        ✕
+      </button>
+    </Badge>
   )
 }

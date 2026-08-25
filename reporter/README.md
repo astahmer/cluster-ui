@@ -20,14 +20,17 @@ import { makeReporterLayer, type ReporterSharding } from "@effect/cluster-ui-rep
 const sharding: ReporterSharding = {
   getSingletons: () => shardingLive.singletons,        // adapt to your API
   getEntityTypes: () => shardingLive.registered,
-  size: () => shardingLive.entityCount
+  size: () => shardingLive.entityCount,
+  // optional — enables the dashboard's Runtime tab:
+  logs: (sinceMs, limit) => logger.recent({ since: sinceMs, limit }),   // oldest first
+  fibers: () => runtime.fiberSnapshot()                                 // live fiber state
 }
 
-// merge HttpRouter.get(...) from makeReporterLayer(sharding) into your server,
+// merge HttpRouter routes from makeReporterLayer(sharding) into your server,
 // or serve it on its own port per runner.
 ```
 
-Endpoint served:
+Endpoints served:
 
 ```
 GET /internal/cluster-ui/state
@@ -36,6 +39,13 @@ GET /internal/cluster-ui/state
   "registeredEntityTypes": ["Mailbox", "Session"],
   "entitiesInMemory": 12
 }
+
+GET /internal/cluster-ui/logs?since=<ms>&limit=<n>     (needs the `logs` provider)
+{ "lines": [{ "t": 1724500000000, "level": "info", "text": "..." }] }
+
+GET /internal/cluster-ui/fibers                        (needs the `fibers` provider)
+{ "fibers": [{ "id": "#123", "name": "worker-1", "status": "running",
+               "startedAt": 1724500000000, "children": 2 }] }
 ```
 
 Runners without this package simply show as "reporter not reachable" in the

@@ -1,16 +1,26 @@
 import * as React from "react"
 import { api, type EntityStat } from "../api.ts"
-import { ActivityDot, SkeletonTable } from "../components/pieces.tsx"
-import { Badge, Input, Table, TBody, TD, TH, THead, TR } from "../components/ui.tsx"
+import {
+  ActivityDot,
+  FilterChip,
+  SkeletonTable,
+  SortableTh,
+  STICKY_TH,
+  useHashParam,
+  useSort
+} from "../components/pieces.tsx"
+import { Badge, Input, Table, TBody, TD, THead, TR } from "../components/ui.tsx"
 import { ErrorNote, PageHeader, usePolling } from "../shell.tsx"
 
 export function EntitiesPage() {
   const [rows, setRows] = React.useState<EntityStat[]>([])
-  const [q, setQ] = React.useState("")
+  const [q, setQ] = useHashParam("q")
   const { loading, error, refresh } = usePolling(async () => setRows(await api.entities()))
+  const sort = useSort<EntityStat>()
 
   if (loading && rows.length === 0) return <SkeletonTable />
   const filtered = rows.filter((r) => r.entityType.toLowerCase().includes(q.toLowerCase()))
+  const sorted = sort.sorted(filtered)
 
   return (
     <div>
@@ -24,22 +34,33 @@ export function EntitiesPage() {
         />
       </PageHeader>
       <ErrorNote error={error} onRetry={refresh} />
+      {(q !== "" || sort.sortKey !== null) && (
+        <div className="mb-2 flex items-center gap-1.5">
+          {q !== "" && <FilterChip label={`type: ${q}`} onRemove={() => setQ("")} />}
+          {sort.sortKey !== null && (
+            <FilterChip
+              label={`sort: ${sort.sortKey} ${sort.dir === "asc" ? "▲" : "▼"}`}
+              onRemove={() => sort.toggle(sort.sortKey!)}
+            />
+          )}
+        </div>
+      )}
       <div className="rounded-lg border border-kumo-line bg-kumo-base">
         <Table>
           <THead>
             <TR>
-              <TH>Entity type</TH>
-              <TH className="text-right">Entities</TH>
-              <TH className="text-right">Messages</TH>
-              <TH className="text-right">Pending</TH>
-              <TH className="text-right">In-flight</TH>
-              <TH className="text-right">Scheduled</TH>
-              <TH className="text-right">Done</TH>
-              <TH>Last activity</TH>
+              <SortableTh label="Entity type" sortKey="entityType" sort={sort} />
+              <SortableTh label="Entities" sortKey="entities" sort={sort} className="text-right" />
+              <SortableTh label="Messages" sortKey="messages" sort={sort} className="text-right" />
+              <SortableTh label="Pending" sortKey="pending" sort={sort} className="text-right" />
+              <SortableTh label="In-flight" sortKey="inflight" sort={sort} className="text-right" />
+              <SortableTh label="Scheduled" sortKey="scheduled" sort={sort} className="text-right" />
+              <SortableTh label="Done" sortKey="done" sort={sort} className="text-right" />
+              <SortableTh label="Last activity" sortKey="lastActivityAt" sort={sort} />
             </TR>
           </THead>
           <TBody>
-            {filtered.map((r) => {
+            {sorted.map((r) => {
               const isWorkflow = r.entityType.startsWith("Workflow/")
               const isCron = r.entityType.startsWith("ClusterCron/")
               const name = isWorkflow ? r.entityType.slice("Workflow/".length) : r.entityType

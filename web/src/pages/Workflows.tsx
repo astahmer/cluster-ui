@@ -1,7 +1,7 @@
 import * as React from "react"
 import { api, type MessageStatus, type Workflow, type WorkflowRun } from "../api.ts"
-import { ActivityDot, SkeletonTable } from "../components/pieces.tsx"
-import { Badge, Card, CardContent, Table, TBody, TD, TH, THead, TR } from "../components/ui.tsx"
+import { ActivityDot, FilterChip, SkeletonTable, SortableTh, STICKY_TH, useHashParam, useSort } from "../components/pieces.tsx"
+import { Badge, Card, CardContent, Select, Table, TBody, TD, TH, THead, TR } from "../components/ui.tsx"
 import { ErrorNote, PageHeader, useLive } from "../shell.tsx"
 import { usePauseWhile } from "../live.ts"
 import { StatusBadge } from "../components/pieces.tsx"
@@ -11,20 +11,41 @@ import { WorkflowRunPage } from "./WorkflowRunDetail.tsx"
 /** server rows also carry `failed` (Failure WithExit reply on the run message) */
 type RunRow = WorkflowRun & { failed?: boolean }
 
+type WorkflowSort = "name" | "runs" | "failedRuns"
+
 export function WorkflowListPage() {
   const [rows, setRows] = React.useState<Workflow[]>([])
+  const [sortByParam, setSortByParam] = useHashParam("sort")
+  const sortBy = (["name", "runs", "failedRuns"].includes(sortByParam) ? sortByParam : "name") as WorkflowSort
   const { loading, error, refresh } = useLive(async () => setRows(await api.workflows()))
 
   if (loading && rows.length === 0) return <SkeletonTable rows={6} cols={4} />
   const totalRuns = rows.reduce((acc, w) => acc + w.runs, 0)
   const totalFailed = rows.reduce((acc, w) => acc + (w.failedRuns ?? 0), 0)
+  const sortedRows =
+    sortBy === "name" ?
+      [...rows].sort((a, b) => a.name.localeCompare(b.name)) :
+      [...rows].sort((a, b) =>
+        sortBy === "runs" ? b.runs - a.runs : (b.failedRuns ?? 0) - (a.failedRuns ?? 0)
+      )
 
   return (
     <div>
       <PageHeader
         title="Workflows"
         subtitle={`${totalRuns} executions across ${rows.length} workflows`}
-      />
+      >
+        <Select aria-label="sort workflows" value={sortBy} onChange={(e) => setSortByParam(e.target.value === "name" ? "" : e.target.value)}>
+          <option value="name">by name</option>
+          <option value="runs">most runs</option>
+          <option value="failedRuns">most failed</option>
+        </Select>
+      </PageHeader>
+      {sortBy !== "name" && (
+        <div className="mb-2">
+          <FilterChip label={`sort: ${sortBy === "runs" ? "most runs" : "most failed"}`} onRemove={() => setSortByParam("")} />
+        </div>
+      )}
       <ErrorNote error={error} onRetry={refresh} />
       {rows.length === 0 ? (
         <Card>
@@ -37,7 +58,7 @@ export function WorkflowListPage() {
         </Card>
       ) : (
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-          {rows.map((w) => (
+          {sortedRows.map((w) => (
             <Card key={w.name} className="transition-colors hover:border-kumo-brand/60">
               <a href={`#/workflows/${encodeURIComponent(w.name)}`} className="block">
                 <div className="flex items-center justify-between px-4 pt-3">
@@ -66,16 +87,23 @@ export function WorkflowListPage() {
   )
 }
 
+const RUN_STATUSES = ["pending", "inflight", "scheduled", "done"] as const
+
 export function WorkflowRunsPage({ name }: { name: string }) {
   const [runs, setRuns] = React.useState<RunRow[] | null>(null)
   const [openExecution, setOpenExecution] = React.useState<string | null>(null)
+  const [statusParam, setStatusParam] = useHashParam("status")
+  const statusFilter = RUN_STATUSES.includes(statusParam as never) ? statusParam : ""
   const { loading, error, refresh } = useLive(async () =>
     setRuns((await api.workflowRuns(name)) as RunRow[])
   )
   // stop background polling while the run-detail panel is open so it doesn't rerender under the cursor
   usePauseWhile(openExecution !== null)
+  const sort = useSort<RunRow>()
 
   if (loading && runs === null) return <SkeletonTable rows={8} cols={4} />
+
+  const visibleRuns = statusFilter ? (runs ?? []).filter((r) => r.status === statusFilter) : runs ?? []
 
   return (
     <div>
@@ -83,20 +111,43 @@ export function WorkflowRunsPage({ name }: { name: string }) {
         <a href="#/workflows" className="text-[13px] text-kumo-subtle hover:text-kumo-default">
           ← all workflows
         </a>
+        <Select
+          aria-label="filter by status"
+          value={statusFilter}
+          onChange={(e) => setStatusParam(e.target.value)}
+        >
+          <option value="">all statuses</option>
+          {RUN_STATUSES.map((st) => (
+            <option key={st} value={st}>
+              {st}
+            </option>
+          ))}
+        </Select>
       </PageHeader>
+      {(statusFilter || sort.sortKey !== null) && (
+        <div className="mb-2 flex items-center gap-1.5">
+          {statusFilter && <FilterChip label={`status: ${statusFilter}`} onRemove={() => setStatusParam("")} />}
+          {sort.sortKey !== null && (
+            <FilterChip
+              label={`sort: ${sort.sortKey} ${sort.dir === "asc" ? "▲" : "▼"}`}
+              onRemove={() => sort.toggle(sort.sortKey!)}
+            />
+          )}
+        </div>
+      )}
       <ErrorNote error={error} onRetry={refresh} />
       <div className="rounded-lg border border-kumo-line bg-kumo-base">
         <Table>
           <THead>
             <TR>
-              <TH>Execution</TH>
-              <TH>Status</TH>
-              <TH>Activities</TH>
-              <TH>Started</TH>
+              <SortableTh label="Execution" sortKey="executionId" sort={sort} />
+              <TH className={STICKY_TH}>Status</TH>
+              <SortableTh label="Activities" sortKey="activityCount" sort={sort} className="text-right" />
+              <SortableTh label="Started" sortKey="createdAt" sort={sort} />
             </TR>
           </THead>
           <TBody>
-            {(runs ?? []).map((r) => (
+            {sort.sorted(visibleRuns).map((r) => (
               <TR
                 key={r.executionId}
                 className={
@@ -126,10 +177,10 @@ export function WorkflowRunsPage({ name }: { name: string }) {
                 </TD>
               </TR>
             ))}
-            {!error && runs !== null && runs.length === 0 && (
+            {!error && runs !== null && visibleRuns.length === 0 && (
               <TR>
                 <TD colSpan={4} className="py-6">
-                  <Empty title="No executions" />
+                  <Empty title={statusFilter ? "no executions match the filter" : "No executions"} />
                 </TD>
               </TR>
             )}

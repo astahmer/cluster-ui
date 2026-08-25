@@ -12,6 +12,7 @@ import { agentTools, callAgentTool } from "./agent-tools.ts"
 import { handleMcpRequest } from "./mcp.ts"
 import { config } from "./config.ts"
 import { makeRedisRepo } from "./redis-repo.ts"
+import { queryRunnerFibers, queryRunnerLogs } from "./singletons.ts"
 import { makeRepo, openDb, type MessageQuery, type Repo } from "./queries.ts"
 import { queryRunnerState } from "./singletons.ts"
 
@@ -99,6 +100,44 @@ const req = Effect.all([HttpServerRequest.HttpServerRequest, HttpRouter.params])
 )
 
 /** request + merged params + parsed JSON body */
+/**
+ * Vendored @emi/core protocol ChatMessage → ai-sdk UIMessage.
+ */
+function toUIMessages(messages: ReadonlyArray<Record<string, unknown>>): UIMessage[] {
+  return messages
+    .filter((m) => m.role === "user" || m.role === "assistant")
+    .map((m) => ({
+      id: typeof m.id === "string" ? m.id : crypto.randomUUID(),
+      role: m.role as "user" | "assistant",
+      parts: (Array.isArray(m.parts) ? m.parts : []).flatMap((rawPart): UIMessage["parts"] => {
+        const part = rawPart as Record<string, unknown>
+        switch (part.type) {
+          case "text":
+            return [{ type: "text", text: String(part.text ?? "") }]
+          case "reasoning":
+            return [{ type: "reasoning", text: String(part.text ?? "") }]
+          case "tool-invocation": {
+            const toolName = String(part.toolName ?? "unknown")
+            const state =
+              part.state === "output-error" ? "output-error" : part.state === "output-available" ? "output-available" : "input-available"
+            return [
+              {
+                type: `tool-${toolName}`,
+                toolCallId: String(part.toolCallId ?? crypto.randomUUID()),
+                state,
+                input: (part.input ?? {}) as never,
+                ...(part.output !== undefined ? { output: part.output as never } : {}),
+                ...(typeof part.errorText === "string" ? { errorText: part.errorText } : {})
+              } as never
+            ]
+          }
+          default:
+            return []
+        }
+      })
+    }))
+}
+
 const reqWithBody: Effect.Effect<
   Record<string, any>,
   never,
@@ -227,6 +266,7 @@ const baseRouter = HttpRouter.empty.pipe(
     Effect.succeed(
       json({
         clusters: [...repos.keys()],
+        clusterKinds: config.clusters.map((c) => ({ name: c.name, kind: c.kind })),
         tracingUrlTemplate: config.tracingUrlTemplate,
         readonly: config.readonly
       })
@@ -384,6 +424,133 @@ const baseRouter = HttpRouter.empty.pipe(
   HttpRouter.post("/api/actions/bulk", bulkActionHandler)
 )
 
+/** handler for redis-only operations; sqlite clusters get a clean 400 */
+function redisOnlyHandler(
+  run: (repo: import("./queries.ts").Repo & RedisRepoExtras, body: Record<string, any>) => Promise<unknown>
+) {
+  return Effect.flatMap(reqWithBody, (p) =>
+    Effect.tryPromise(async (): Promise<HttpServerResponse.HttpServerResponse> => {
+      try {
+        assertWritable(config.readonly)
+        const repo = repoFor(p.cluster ?? p.body?.cluster)
+        if (!repo) return notFound("cluster")
+        if (repo.db === null) {
+          const result = await run(repo as never, p.body ?? {})
+          return json(result)
+        }
+        return HttpServerResponse.unsafeJson(
+          { error: "not supported for this cluster type" },
+          { status: 400 }
+        )
+      } catch (e) {
+        if (e instanceof ActionError) {
+          return HttpServerResponse.unsafeJson({ error: e.message }, { status: e.status })
+        }
+        return HttpServerResponse.unsafeJson(
+          { error: e instanceof Error ? e.message : String(e) },
+          { status: 500 }
+        )
+      }
+    })
+  )
+}
+
+type RedisRepoExtras = import("./redis-repo.ts").RedisRepoExtras
+
+function requireString(body: Record<string, any>, field: string): void {
+  if (typeof body[field] !== "string" || body[field] === "") {
+    throw new ActionError(`${field} is required`, 400)
+  }
+}
+
+function numOrUndefined(v: unknown): number | undefined {
+  const n = Number(v)
+  return v !== undefined && v !== "" && Number.isFinite(n) ? n : undefined
+}
+
+const redisRouter = HttpRouter.empty.pipe(
+  // ------------------------------------------------------- redis queue controls
+  HttpRouter.post(
+    "/api/actions/pause-queue",
+    redisOnlyHandler(async (repo, body) => {
+      requireString(body, "queue")
+      return repo.actions.pauseQueue(body.queue)
+    })
+  ),
+  HttpRouter.post(
+    "/api/actions/resume-queue",
+    redisOnlyHandler(async (repo, body) => {
+      requireString(body, "queue")
+      return repo.actions.resumeQueue(body.queue)
+    })
+  ),
+  HttpRouter.post(
+    "/api/actions/promote",
+    redisOnlyHandler(async (repo, body) => {
+      requireString(body, "id")
+      return repo.actions.promote(body.id)
+    })
+  ),
+  HttpRouter.post(
+    "/api/actions/clean",
+    redisOnlyHandler(async (repo, body) => {
+      const state = body.state === "failed" ? "failed" : body.state === "*" ? "*" : "completed"
+      if (state === "*") {
+        const done = await repo.actions.clean(String(body.queue ?? "*"), "completed", {
+          olderThanMs: numOrUndefined(body.olderThanMs),
+          count: numOrUndefined(body.count)
+        })
+        const failed = await repo.actions.clean(String(body.queue ?? "*"), "failed", {
+          olderThanMs: numOrUndefined(body.olderThanMs),
+          count: numOrUndefined(body.count)
+        })
+        return { removed: done.removed + failed.removed }
+      }
+      return repo.actions.clean(String(body.queue ?? "*"), state, {
+        olderThanMs: numOrUndefined(body.olderThanMs),
+        count: numOrUndefined(body.count)
+      })
+    })
+  ),
+  HttpRouter.post(
+    "/api/actions/add-job",
+    redisOnlyHandler(async (repo, body) => {
+      requireString(body, "queue")
+      if (typeof body.data === "undefined") throw new ActionError("data is required", 400)
+      return repo.actions.addJob(body.queue, typeof body.name === "string" && body.name !== "" ? body.name : "manual", body.data)
+    })
+  ),
+  HttpRouter.get(
+    "/api/queues",
+    Effect.flatMap(HttpRouter.params, (params) =>
+      Effect.flatMap(
+        Effect.sync(() => repoFor(params.cluster)),
+        (repo) => {
+          if (!repo) return Effect.succeed(notFound("cluster"))
+          if (repo.db !== null) return Effect.succeed(json([]))
+          return Effect.tryPromise(async () => json(await (repo as never as RedisRepoExtras).queues()))
+        }
+      )
+    )
+  ),
+  HttpRouter.get(
+    "/api/job-tree/:id",
+    Effect.flatMap(req, (p) => {
+      const repo = repoFor(p.cluster)
+      if (!repo) return Effect.succeed(notFound("cluster"))
+      if (repo.db !== null || !(repo as unknown as RedisRepoExtras).jobTree) {
+        return Effect.succeed(
+          HttpServerResponse.unsafeJson({ error: "not supported for this cluster type" }, { status: 400 })
+        )
+      }
+      return Effect.tryPromise(async () => {
+        const tree = await (repo as unknown as RedisRepoExtras).jobTree(decodeURIComponent(p.id!))
+        return tree ? json(tree) : notFound("job")
+      })
+    })
+  )
+)
+
 const agentRouter = HttpRouter.empty.pipe(
   // ------------------------------------------------------------- agent (MCP + chat)
   HttpRouter.post(
@@ -430,7 +597,7 @@ const agentRouter = HttpRouter.empty.pipe(
           )
         }
 
-        const uiMessages = Array.isArray(body.messages) ? (body.messages as UIMessage[]) : []
+        const uiMessages = toUIMessages(Array.isArray(body.messages) ? body.messages : [])
 
         const tools: ToolSet = {}
         for (const t of agentTools) {
@@ -458,7 +625,7 @@ const agentRouter = HttpRouter.empty.pipe(
   )
 )
 
-export const api = HttpRouter.concat(baseRouter, agentRouter).pipe(
+export const api = HttpRouter.concat(HttpRouter.concat(baseRouter, redisRouter), agentRouter).pipe(
   // Prometheus scrape endpoint — outside /api/* so the auth middleware's
   // static exemption covers it (same treatment as /healthz)
   HttpRouter.get(
@@ -485,6 +652,28 @@ export const api = HttpRouter.concat(baseRouter, agentRouter).pipe(
       if (!repo || !p.traceId) return notFound(p.traceId ? "cluster" : "traceId")
       const rows = repo.trace(decodeURIComponent(p.traceId))
       return rows.length === 0 ? notFound("trace") : json({ traceId: decodeURIComponent(p.traceId), rows })
+    })
+  ),
+
+  HttpRouter.get(
+    "/api/logs",
+    Effect.flatMap(req, (p) => {
+      const repo = repoFor(p.cluster)
+      if (!repo) return Effect.succeed(notFound("cluster"))
+      const since = p.since !== undefined ? Number(p.since) : undefined
+      return Effect.map(
+        Effect.tryPromise(() => queryRunnerLogs(repo, Number.isFinite(since) ? since : undefined)),
+        json
+      )
+    })
+  ),
+
+  HttpRouter.get(
+    "/api/fibers",
+    Effect.flatMap(req, (p) => {
+      const repo = repoFor(p.cluster)
+      if (!repo) return Effect.succeed(notFound("cluster"))
+      return Effect.map(Effect.tryPromise(() => queryRunnerFibers(repo)), json)
     })
   ),
 

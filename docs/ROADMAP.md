@@ -40,7 +40,7 @@ attachment, shard distribution map, snowflake age decoding, singleton fan-out
 | 10 | OIDC login | deferred — pair with pocket-id; token auth covers today |
 | 11 | Worker live panels/logs | deferred — reporter v2 (below) |
 
-## 3. Reporter v2 (deferred)
+## 3. Reporter v2 (SHIPPED — logs + fibers endpoints, dashboard Runtime section)
 
 Extend `@effect/cluster-ui-reporter` beyond `GET /internal/cluster-ui/state`:
 
@@ -70,7 +70,13 @@ Build two views on shared primitives:
    types, total duration, outcome); detail = waterfall ordered by snowflake-derived
    timestamps, colored by message kind/status; keep external trace-url link.
 
-## 5. MCP + agent page (SHIPPED v5)
+## 5. MCP + agent page (SHIPPED v5/v6)
+
+v6: Agent page now runs the FULL vendored @emi/core runtime (xstate 5 actor system:
+transport/lifecycle/UI/browser-state/follow-up-queue/settings/suggestions actors +
+createChatRuntime), temporary threads only — no persistence (deliberate). ai-sdk
+UIMessage tool chunks added to the vendored wire protocol (tool-input-available /
+tool-output-available).
 
 - `server/src/agent-tools.ts` — one shared registry of 12 tools (8 read + 4 write),
   zod-4 schemas, write tools gated by CLUSTER_UI_READONLY.
