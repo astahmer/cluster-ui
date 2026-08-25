@@ -14,7 +14,8 @@
     "smoke": "node web/smoke.mjs",
     "demo-runner": "node --experimental-transform-types --no-warnings --import ./scripts/register-ts-resolve.mjs server/scripts/demo-runner.ts",
     "dev:redis": "bash scripts/dev-redis.sh",
-    "seed:redis": "node scripts/demo-redis.mjs"
+    "seed:redis": "node scripts/demo-redis.mjs",
+    "redis:cli": "redis-cli -p 6399"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "4.0.41",

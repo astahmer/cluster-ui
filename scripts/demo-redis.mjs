@@ -219,13 +219,18 @@ async function main() {
   console.log("Seeded demo BullMQ data:")
   for (const [q, n] of Object.entries(counts)) console.log(`  ${q.padEnd(14)} ${n} jobs`)
   console.log(`  total ~${created} writes · flow root: ${parentKey}`)
-  console.log("\nStart the dashboard with this cluster included:")
-  console.log('  CLUSTER_UI_CLUSTERS=default=./data/cluster.db,local-redis=redis://127.0.0.1:6399 pnpm dev:server')
+  console.log(
+    `\nNote: redis has no web page - http://localhost:6399 will always look empty.\n` +
+    `Browse the data through cluster-ui itself (cluster switcher -> local-redis):\n` +
+    `  CLUSTER_UI_CLUSTERS=default=./data/cluster.db,local-redis=redis://127.0.0.1:6399 pnpm dev:server\n` +
+    `or poke it by hand:\n` +
+    `  pnpm redis:cli   (then e.g. KEYS bull:*:id, HGETALL bull:emails:<jobId>)`
+  )
+  redis.disconnect()
+  process.exit(0)
 }
 
-main()
-  .catch((e) => {
-    console.error(e)
-    process.exitCode = 1
-  })
-  .finally(() => redis.disconnect())
+main().catch((e) => {
+  console.error(e instanceof Error ? e.message : e)
+  process.exit(1)
+})
