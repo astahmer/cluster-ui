@@ -260,19 +260,20 @@ export function SortableTh({
   const active = sort.sortKey === sortKey
   return (
     <TH
-      className={cn(
-        "sticky top-0 z-10 cursor-pointer select-none bg-kumo-base hover:text-kumo-default",
-        active && "text-kumo-default",
-        className
-      )}
-      onClick={() => sort.toggle(sortKey)}
+      className={cn("sticky top-0 z-10 bg-kumo-base p-0", active && "text-kumo-default", className)}
       aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}
-      title={`sort by ${typeof label === "string" ? label.toLowerCase() : sortKey}`}
     >
-      {label}
-      <span className="ml-1 inline-block w-2.5 text-[9px] text-kumo-inactive">
-        {active ? (sort.dir === "asc" ? "▲" : "▼") : ""}
-      </span>
+      <button
+        type="button"
+        onClick={() => sort.toggle(sortKey)}
+        className="w-full cursor-pointer select-none px-3 py-2 text-left font-medium hover:text-kumo-default"
+        title={`sort by ${typeof label === "string" ? label.toLowerCase() : sortKey}`}
+      >
+        {label}
+        <span className="ml-1 inline-block w-2.5 text-[9px] text-kumo-inactive">
+          {active ? (sort.dir === "asc" ? "▲" : "▼") : ""}
+        </span>
+      </button>
     </TH>
   )
 }

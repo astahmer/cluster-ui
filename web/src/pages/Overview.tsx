@@ -76,7 +76,8 @@ export function OverviewPage() {
         </Banner>
       )}
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+      {/* 5 cards: 3-col middle tier keeps the last card from orphaning half-width (UX review P2-1) */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         <StatCard label="Pending" value={m.pending} sub="waiting to be delivered" href="#/messages?status=pending" />
         <StatCard label="In-flight" value={m.inflight} sub="read in the last 5 min" href="#/messages?status=inflight" />
         <StatCard label="Scheduled" value={m.scheduled} sub="deliver_at in the future" href="#/messages?status=scheduled" />

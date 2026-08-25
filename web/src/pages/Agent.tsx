@@ -183,6 +183,8 @@ function AgentPageBody({
   const messages = useChatSelector((s) => s.activeThread.messages)
   const draft = useChatSelector((s) => s.composer.text)
   const isStreaming = useChatSelector((s) => s.activeThread.isStreaming)
+  // transport/provider failures (bad key, network, stream errors) surface here
+  const chatError = useChatSelector((s) => s.error)
 
   const send = () => {
     if (!config.apiKey.trim()) return
@@ -242,7 +244,7 @@ function AgentPageBody({
         )}
       </div>
 
-      <ErrorNote error={null} />
+      <ErrorNote error={chatError ?? null} />
 
       {/* composer */}
       <div className="mt-3 flex shrink-0 items-end gap-2">

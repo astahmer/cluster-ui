@@ -118,12 +118,8 @@ export function WorkflowRunsPage({ name }: { name: string }) {
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const facetDefs: FacetDef<RunRow>[] = [
-    {
-      key: "status",
-      label: "status",
-      options: (all) => [...new Set(all.map((r) => r.status))].map((v) => ({ value: v })),
-      predicate: (r, v) => v.includes(r.status)
-    },
+    // status filtering lives in the header <Select> (URL-backed `?status=`) —
+    // a client facet here would duplicate it in two places (UX review P1-13)
     presenceFacet("failed", "failed", (r) => Boolean((r as RunRow).failed))
   ]
   const facets = useFacets(runs ?? [], facetDefs)

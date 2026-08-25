@@ -1,4 +1,5 @@
 import * as React from "react"
+import { eventsUrl } from "./api.ts"
 import { markFresh } from "./freshness.ts"
 
 /**
@@ -71,7 +72,7 @@ function startFallback() {
 function connect() {
   if (source !== null || fallbackTimer !== null) return
   try {
-    const es = new EventSource("/api/events")
+    const es = new EventSource(eventsUrl())
     es.addEventListener("overview", notify as EventListener)
     es.addEventListener("overview", () => setSseFailed(false) as unknown as EventListener)
     es.onerror = () => {

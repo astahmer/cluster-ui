@@ -43,6 +43,9 @@ pnpm dev:server   # API only, node --watch on :8787 (native TS, no tsx)
 pnpm dev:web      # vite dev server (proxies /api to :8787)
 ```
 
+Docs: [`docs/ROADMAP.md`](docs/ROADMAP.md) (feature roadmap) and
+[`docs/UX-REVIEW.md`](docs/UX-REVIEW.md) (UX/layout audit with fix status).
+
 ### Local redis demo
 
 Test the redis (BullMQ) cluster features without any external service:

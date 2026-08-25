@@ -7,6 +7,7 @@ import {
   type MessageStatus,
   type RunResult
 } from "../api.ts"
+import { Trash, XCircle } from "@phosphor-icons/react"
 import { downloadCsv, downloadJson } from "../export.ts"
 import { DetailPanel, SkeletonTable, StatusBadge, statusTone, useMessageDetail } from "../components/pieces.tsx"
 import { FilterBar, useFacets, type FacetDef } from "../components/filters/index.tsx"
@@ -372,7 +373,7 @@ export function MessagesPage({ initialFilters }: { initialFilters?: MessagesInit
             ⟳ retry selected
           </Button>
           <Button variant="danger" size="sm" onClick={() => runBulk("delete")}>
-            ✕ delete selected
+            <Trash className="h-3.5 w-3.5" /> delete selected
           </Button>
           <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
             clear
@@ -499,7 +500,7 @@ function MessageRow({
         <div className="flex items-center gap-1.5">
           {m.failed && (
             <span title="failed execution" className="text-kumo-danger">
-              ✕
+              <XCircle weight="fill" className="h-3.5 w-3.5" />
             </span>
           )}
           <StatusBadge status={m.status} />
@@ -549,7 +550,7 @@ function MessageRow({
               onDelete()
             }}
           >
-            ✕
+            <Trash className="h-3.5 w-3.5" />
           </button>
         </div>
       </TD>
@@ -565,7 +566,7 @@ function OutcomeBanner({ result }: { result: RunResult }) {
     <Banner
       variant={failure ? "error" : "default"}
       size="sm"
-      title={failure ? "✕ Failed" : "✓ Succeeded"}
+      title={failure ? "Failed" : "Succeeded"}
       action={<Badge tone={failure ? "err" : "ok"}>{result.outcome}</Badge>}
     />
   )
@@ -628,6 +629,8 @@ function MessageDetailBody({
 
   const canRetry = m.status === "done" || (m.status === "scheduled" && !m.failed)
   const canInterrupt = m.status === "pending" || m.status === "inflight" || m.status === "scheduled"
+  // reset-activity re-arms a workflow activity (processed=0, last_read=NULL)
+  const canResetActivity = m.entityType.startsWith("Workflow/")
   const traceUrl =
     config?.tracingUrlTemplate && m.traceId ?
       config.tracingUrlTemplate.replace("{traceId}", encodeURIComponent(m.traceId)) :
@@ -652,7 +655,11 @@ function MessageDetailBody({
       <section className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg border border-kumo-line bg-kumo-canvas/50 p-3">
         <Field label="Status">
           <div className="flex items-center gap-1.5">
-            {m.failed && <span className="text-kumo-danger">✕</span>}
+            {m.failed && (
+              <span className="text-kumo-danger">
+                <XCircle weight="fill" className="h-3.5 w-3.5" />
+              </span>
+            )}
             <StatusBadge status={m.status} />
           </div>
         </Field>
@@ -680,7 +687,7 @@ function MessageDetailBody({
         )}
       </section>
 
-      {(canRetry || canInterrupt) && (
+      {(canRetry || canInterrupt || canResetActivity) && (
         <section className="flex items-center gap-2">
           {canRetry && (
             <Button
@@ -694,7 +701,18 @@ function MessageDetailBody({
           )}
           {canInterrupt && (
             <Button variant="danger" size="sm" disabled={busy} onClick={() => act(() => api.interruptMessage(m.id), "interrupt")}>
-              ✕ interrupt
+              <XCircle className="h-3.5 w-3.5" /> interrupt
+            </Button>
+          )}
+          {canResetActivity && (
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={busy}
+              title="clear processed/last_read so the engine re-runs this activity"
+              onClick={() => act(() => api.resetActivity(m.id), "reset activity")}
+            >
+              ↺ reset activity
             </Button>
           )}
           <span className="ml-auto flex items-center gap-1">
