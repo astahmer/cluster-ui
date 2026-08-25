@@ -93,7 +93,8 @@ async function fanOut<T>(
   wrap: (address: string, data: unknown) => T,
   onError: (address: string, message: string) => T
 ): Promise<{ runners: T[] }> {
-  const addresses = [...new Set(repo.runners().map((r) => r.address))]
+  const runnerRows = await Promise.resolve(repo.runners())
+  const addresses = [...new Set(runnerRows.map((r) => r.address))]
   const reports = await Promise.all(
     addresses.map(async (address) => {
       try {

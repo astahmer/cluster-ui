@@ -702,8 +702,9 @@ export const api = HttpRouter.concat(HttpRouter.concat(baseRouter, redisRouter),
   HttpRouter.get(
     "/api/metrics/history",
     Effect.map(req, (p) => {
-      const h = metrics.history(p.cluster)
-      if (h === null) return notFound("cluster")
+      // known cluster without samples yet -> empty series (fresh boots), else 404
+      if (p.cluster !== undefined && !repos.has(p.cluster)) return notFound("cluster")
+      const h = metrics.history(p.cluster === undefined ? p.cluster : p.cluster) ?? []
       const rangeMs = Number(p.rangeMs)
       if (p.rangeMs !== undefined && Number.isFinite(rangeMs) && rangeMs > 0) {
         const cutoff = Date.now() - rangeMs

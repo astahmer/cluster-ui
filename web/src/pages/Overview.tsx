@@ -46,6 +46,14 @@ export function OverviewPage() {
         <SkeletonTable rows={5} cols={4} />
       </div>
     )
+  if (!data)
+    return (
+      <div>
+        <PageHeader title="Overview" subtitle="live cluster state" />
+        <ErrorNote error={overviewLive.error ?? "no data"} onRetry={overviewLive.refresh} />
+        <SkeletonCards />
+      </div>
+    )
   const m = data!.messages
   const shards = data!.shards
   const unassigned = data!.unassignedShards ?? shards.total - shards.assigned

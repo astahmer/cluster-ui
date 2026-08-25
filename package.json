@@ -15,7 +15,9 @@
     "demo-runner": "node --experimental-transform-types --no-warnings --import ./scripts/register-ts-resolve.mjs server/scripts/demo-runner.ts",
     "dev:redis": "bash scripts/dev-redis.sh",
     "seed:redis": "node scripts/demo-redis.mjs",
-    "redis:cli": "redis-cli -p 6399"
+    "redis:cli": "redis-cli -p 6399",
+    "dev": "bash scripts/dev-all.sh",
+    "e2e:browser": "node scripts/browser-e2e.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "4.0.41",

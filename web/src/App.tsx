@@ -33,6 +33,9 @@ export function App() {
   const route = useRoute()
   const parts = route.segments
 
+  // bare #/ should render Overview, not 'unknown route'
+  if (parts.length === 0) parts.push("overview")
+
   let content: React.ReactNode
   try {
     switch (parts[0]) {
