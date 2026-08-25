@@ -268,29 +268,6 @@ export function makeRedisRepo(url: string): import("./queries.ts").Repo {
 
   const allSync = <T,>(value: T): Promise<T> => Promise.resolve(value)
 
-  const repo = {
-    db: null as never,
-    prefix: "redis",
-    listMessages: (q?: MessageQuery) => listMessages(q ?? {}),
-    getMessage,
-    overview: () => overview(),
-    runners: () => allSync([]),
-    shards: () => allSync([]),
-    entities: () => entities(),
-    entityInstances: (_entityType: string, _opts?: unknown) =>
-      allSync({ rows: [], total: 0, page: 1, pageSize: 50 }),
-    crons: () => allSync([]),
-    workflows: () => allSync([]),
-    workflowRuns: (_name: string) => allSync([]),
-    workflowRun: (_name: string, _executionId: string) => allSync(null),
-    traces: (_limit?: number) => allSync([]),
-    trace: (_traceId: string) => allSync([]),
-    queues: () => queues(),
-    jobTree: (id: string) => jobTree(id)
-  }
-
-  // write actions exposed via the same action-handler path need db/prefix —
-  // redis clusters route writes through these instead:
   const actions = {
     async retry(id: string) {
       assertWritable(config.readonly)
@@ -491,6 +468,31 @@ export function makeRedisRepo(url: string): import("./queries.ts").Repo {
       return v ?? null
     }
   }
+
+  const repo = {
+    db: null as never,
+    prefix: "redis",
+    listMessages: (q?: MessageQuery) => listMessages(q ?? {}),
+    getMessage,
+    overview: () => overview(),
+    runners: () => allSync([]),
+    shards: () => allSync([]),
+    entities: () => entities(),
+    entityInstances: (_entityType: string, _opts?: unknown) =>
+      allSync({ rows: [], total: 0, page: 1, pageSize: 50 }),
+    crons: () => allSync([]),
+    workflows: () => allSync([]),
+    workflowRuns: (_name: string) => allSync([]),
+    workflowRun: (_name: string, _executionId: string) => allSync(null),
+    traces: (_limit?: number) => allSync([]),
+    trace: (_traceId: string) => allSync([]),
+    queues: () => queues(),
+    jobTree: (id: string) => jobTree(id),
+    actions
+  }
+
+  // write actions exposed via the same action-handler path need db/prefix —
+  // redis clusters route writes through these instead:
 
   return repo as unknown as import("./queries.ts").Repo & RedisRepoExtras
 }

@@ -39,9 +39,11 @@ export function useFacets<T>(rows: readonly T[], defs: ReadonlyArray<FacetDef<T>
   const [active, setActive] = React.useState<Record<string, string[]>>({})
 
   const filtered = React.useMemo(() => {
+    // tolerate non-array data while a page's first fetch resolves or a backend degrades
+    const list: readonly T[] = Array.isArray(rows) ? rows : []
     const activeDefs = defs.filter((d) => (active[d.key]?.length ?? 0) > 0)
-    if (activeDefs.length === 0) return [...rows]
-    return rows.filter((row) => activeDefs.every((def) => def.predicate(row, active[def.key])))
+    if (activeDefs.length === 0) return [...list]
+    return list.filter((row) => activeDefs.every((def) => def.predicate(row, active[def.key])))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, defs, active])
 

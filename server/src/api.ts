@@ -320,10 +320,10 @@ const baseRouter = HttpRouter.empty.pipe(
 
   HttpRouter.get(
     "/api/entity-instances",
-    Effect.map(req, (p) => {
+    Effect.flatMap(req, (p) => {
       const repo = repoFor(p.cluster)
-      if (!repo || !p.entityType) return notFound(p.entityType ? "cluster" : "entityType")
-      return json(
+      if (!repo || !p.entityType) return Effect.succeed(notFound(p.entityType ? "cluster" : "entityType"))
+      return jsonMaybeAsync(
         repo.entityInstances(decodeURIComponent(p.entityType), {
           q: p.q,
           page: intParam(p.page),
@@ -415,12 +415,16 @@ const baseRouter = HttpRouter.empty.pipe(
 
   HttpRouter.get(
     "/api/workflows/:name/:executionId",
-    Effect.map(req, (p) => {
-      const repo = repoFor(p.cluster)
-      if (!repo) return notFound("cluster")
-      const result = repo.workflowRun(decodeURIComponent(p.name!), decodeURIComponent(p.executionId!))
-      return result ? json(result) : notFound("workflow run")
-    })
+    Effect.flatMap(req, (p) =>
+      Effect.tryPromise(async (): Promise<HttpServerResponse.HttpServerResponse> => {
+        const repo = repoFor(p.cluster)
+        if (!repo) return notFound("cluster")
+        const result = await Promise.resolve(
+          repo.workflowRun(decodeURIComponent(p.name!), decodeURIComponent(p.executionId!))
+        )
+        return result ? json(result) : notFound("workflow run")
+      })
+    )
   ),
 
   // ------------------------------------------------------------------ actions

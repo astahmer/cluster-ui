@@ -330,7 +330,7 @@ async function runChecks() {
   // ---- auth flow (separate server with CLUSTER_UI_TOKEN) ----------------
   const { spawn } = await import("node:child_process")
   const AUTH_PORT = PORT + 1
-  const child = spawn("npx", ["tsx", "server/src/main.ts"], {
+  const child = spawn("node", ["--experimental-transform-types", "--no-warnings", "--import", "./scripts/register-ts-resolve.mjs", "server/src/main.ts"], {
     cwd: resolve(import.meta.dirname, "../.."),
     env: { ...process.env, PORT: String(AUTH_PORT), CLUSTER_UI_TOKEN: "secret-token" },
     stdio: "ignore"
@@ -358,6 +358,162 @@ async function runChecks() {
     if (!staticFree) failures++
   } finally {
     child.kill("SIGKILL")
+  }
+
+  // ---- redis integration (spawns its own redis + demo seed) -------------
+  const { execFileSync } = await import("node:child_process")
+  let redisProc: ChildProcess | null = null
+  const hasRedis = await new Promise<boolean>((resolveHas) => {
+    try {
+      execFileSync("which", ["redis-server"], { stdio: "ignore" })
+      resolveHas(true)
+    } catch {
+      resolveHas(false)
+    }
+  })
+  if (!hasRedis) {
+    console.log("- redis-server not on PATH — skipping redis integration section")
+  } else {
+    const REDIS_PORT = 6399
+    redisProc = spawn("redis-server", ["--port", String(REDIS_PORT), "--daemonize", "no", "--save", ""], {
+      stdio: "ignore"
+    })
+    await new Promise((r) => setTimeout(r, 800))
+    try {
+      const REDIS_PORT_STR = String(REDIS_PORT)
+      const seedOut = execFileSync("node", ["scripts/demo-redis.mjs"], {
+        cwd: resolve(import.meta.dirname, "../.."),
+        encoding: "utf8",
+        timeout: 20_000
+      })
+      const rootMatch = seedOut.match(/flow root: bull:([a-z]+):(\d+)/)
+      const ROOT_ID = rootMatch ? `${rootMatch[1]}:${rootMatch[2]}` : null
+
+      const R_PORT = PORT + 2
+      const envClusters = `default=${resolve(import.meta.dirname, "../../data/cluster.db")},local-redis=redis://127.0.0.1:${REDIS_PORT}`
+      const rchild = spawn("node",
+        ["--experimental-transform-types", "--no-warnings", "--import", "./scripts/register-ts-resolve.mjs", "server/src/main.ts"],
+        {
+          cwd: resolve(import.meta.dirname, "../.."),
+          env: { ...process.env, PORT: String(R_PORT), CLUSTER_UI_CLUSTERS: envClusters },
+          stdio: "ignore"
+        }
+      )
+      try {
+        let rup = false
+        for (let i = 0; i < 40 && !rup; i++) {
+          await new Promise((r2) => setTimeout(r2, 250))
+          rup = await fetch(`http://127.0.0.1:${R_PORT}/healthz`).then((r2) => r2.ok).catch(() => false)
+        }
+
+        const rc = async (name: string, path: string, expect: (body: any) => boolean) => {
+          const res = await fetch(`http://127.0.0.1:${R_PORT}${path}`)
+          const body = await res.json().catch(() => null)
+          const ok = res.status === 200 && body !== null && expect(body)
+          console.log(`${ok ? "✓" : "✗"} ${name} (${res.status})`)
+          if (!ok) {
+            failures++
+            console.log("  ", JSON.stringify(body).slice(0, 200))
+          }
+          return body
+        }
+
+        await rc("redis overview counts", "/api/overview?cluster=local-redis", (b) =>
+          b.messages.failed === 8 && b.messages.done > 0 && b.messages.pending > 0)
+
+        const sched = await rc("redis scheduled rows are arrays", "/api/messages?cluster=local-redis&status=scheduled&pageSize=3",
+          (b) => Array.isArray(b.rows))
+        void sched
+
+        const firstDone = await rc("redis done rows", "/api/messages?cluster=local-redis&status=done&pageSize=1",
+          (b) => Array.isArray(b.rows) && b.rows.length === 1)
+        const detailId = firstDone?.rows?.[0]?.id
+        if (detailId) {
+          const dres = await fetch(`http://127.0.0.1:${R_PORT}/api/messages/${encodeURIComponent(detailId)}?cluster=local-redis`)
+          const detail = await dres.json().catch(() => null)
+          const dOk = dres.status === 200 && typeof detail?.message?.status === "string"
+          console.log(`${dOk ? "✓" : "✗"} redis message detail envelope (.message present)`)
+          if (!dOk) failures++
+        }
+
+        // THE regression: entity instances must be an object with rows array
+        await rc("redis entity instances (regression)", "/api/entity-instances?cluster=local-redis&entityType=emails",
+          (b) => Array.isArray(b.rows) && typeof b.total === "number")
+
+        const queuesBody = await rc("redis queues listing", "/api/queues?cluster=local-redis",
+          (b) => Array.isArray(b) && b.some((q: any) => q.name === "webhooks" && q.paused === true))
+
+        // pause/resume round trip on a non-paused queue
+        await fetch(`http://127.0.0.1:${R_PORT}/api/actions/pause-queue`, {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ queue: "payments", cluster: "local-redis" })
+        })
+        const afterPause = await fetch(`http://127.0.0.1:${R_PORT}/api/queues?cluster=local-redis`).then((r2) => r2.json())
+        const pausedOk = afterPause.some((q: any) => q.name === "payments" && q.paused === true)
+        await fetch(`http://127.0.0.1:${R_PORT}/api/actions/resume-queue`, {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ queue: "payments", cluster: "local-redis" })
+        })
+        const afterResume = await fetch(`http://127.0.0.1:${R_PORT}/api/queues?cluster=local-redis`).then((r2) => r2.json())
+        const resumedOk = afterResume.every((q: any) => !(q.name === "payments" && q.paused))
+        console.log(`${pausedOk && resumedOk ? "✓" : "✗"} queue pause/resume round trip`)
+        if (!(pausedOk && resumedOk)) failures++
+        void queuesBody
+
+        // job tree: flow parent -> 3 cross-queue children
+        if (ROOT_ID) {
+          const treeRes = await fetch(`http://127.0.0.1:${R_PORT}/api/job-tree/${encodeURIComponent(ROOT_ID)}?cluster=local-redis`)
+          const tree = await treeRes.json().catch(() => null)
+          const treeOk = treeRes.status === 200 && Array.isArray(tree?.children) && tree.children.length === 3
+          console.log(`${treeOk ? "✓" : "✗"} job-tree resolves flow parent w/ 3 children`)
+          if (!treeOk) failures++
+        } else {
+          failures++
+          console.log("✗ could not parse flow root from seeder output")
+        }
+
+        // add-job -> shows up as pending; clean removes completed by count
+        const addRes = await fetch(`http://127.0.0.1:${R_PORT}/api/actions/add-job`, {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ queue: "emails", name: "dash-test", data: { source: "e2e" }, cluster: "local-redis" })
+        })
+        const added = await addRes.json().catch(() => null)
+        const addOk = addRes.status === 200 && typeof added?.id === "string"
+        console.log(`${addOk ? "✓" : "✗"} add-job returns generated id`)
+        if (!addOk) failures++
+
+        const cleanRes = await fetch(`http://127.0.0.1:${R_PORT}/api/actions/clean`, {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ queue: "*", state: "completed", count: 5, cluster: "local-redis" })
+        })
+        const cleaned = await cleanRes.json().catch(() => null)
+        const cleanOk = cleanRes.status === 200 && typeof cleaned?.removed === "number" && cleaned.removed >= 1
+        console.log(`${cleanOk ? "✓" : "✗"} clean completed by count (removed ${cleaned?.removed ?? "?"})`)
+        if (!cleanOk) failures++
+
+        // promote: delay one job then promote it back to wait
+        // (covered indirectly by add/pause flows above; direct promote needs a delayed id —
+        //  fetch one from scheduled view)
+        const delayedRows = await fetch(`http://127.0.0.1:${R_PORT}/api/messages?cluster=local-redis&status=scheduled&pageSize=1`).then((r2) => r2.json())
+        if (delayedRows?.rows?.length === 1) {
+          await fetch(`http://127.0.0.1:${R_PORT}/api/actions/promote`, {
+            method: "POST", headers: { "content-type": "application/json" },
+            body: JSON.stringify({ id: delayedRows.rows[0].id, cluster: "local-redis" })
+          })
+          const afterPromote = await fetch(`http://127.0.0.1:${R_PORT}/api/messages?cluster=local-redis&entityId=${delayedRows.rows[0].entityId}&pageSize=5`).then((r2) => r2.json())
+          const promotedOk = Array.isArray(afterPromote.rows) && afterPromote.rows.some((r2: any) => r2.status === "pending")
+          console.log(`${promotedOk ? "✓" : "✗"} promote delayed -> pending`)
+          if (!promotedOk) failures++
+        }
+      } finally {
+        rchild.kill("SIGKILL")
+      }
+    } finally {
+      try {
+        execFileSync("redis-cli", ["-p", String(REDIS_PORT), "shutdown", "nosave"], { stdio: "ignore" })
+      } catch {}
+      redisProc.kill("SIGKILL")
+    }
   }
 
   console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURES`)

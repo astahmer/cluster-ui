@@ -25,7 +25,7 @@ export function EntityInstancesPage({ entityType }: { entityType: string }) {
   const { loading, error, refresh } = usePolling(
     async () => {
       const res = await api.entityInstances({ entityType, q: debouncedQ || undefined, page, pageSize })
-      setRows(res.rows)
+      setRows(Array.isArray(res.rows) ? res.rows : [])
       setTotal(res.total)
     },
     [entityType, debouncedQ, page, pageSize]
