@@ -18,7 +18,13 @@ import { McpPage } from "./pages/Mcp.tsx"
  * this file compiling against either signature.
  */
 const SeededMessagesPage = MessagesPage as unknown as React.ComponentType<{
-  initialFilters?: { entityType?: string; entityId?: string; status?: string; q?: string }
+  initialFilters?: {
+    entityType?: string
+    entityId?: string
+    status?: string
+    failed?: string
+    q?: string
+  }
 }>
 
 const TypedEntityInstances = EntityInstancesPage as React.ComponentType<{ entityType: string }>
@@ -73,6 +79,7 @@ export function App() {
               entityType: route.params.get("entityType") ?? undefined,
               entityId: route.params.get("entityId") ?? undefined,
               status: route.params.get("status") ?? undefined,
+              failed: route.params.get("failed") ?? undefined,
               q: route.params.get("q") ?? undefined
             }}
           />

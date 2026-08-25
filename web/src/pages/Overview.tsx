@@ -69,16 +69,17 @@ export function OverviewPage() {
       )}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-        <StatCard label="Pending" value={m.pending} sub="waiting to be delivered" />
-        <StatCard label="In-flight" value={m.inflight} sub="read in the last 5 min" />
-        <StatCard label="Scheduled" value={m.scheduled} sub="deliver_at in the future" />
+        <StatCard label="Pending" value={m.pending} sub="waiting to be delivered" href="#/messages?status=pending" />
+        <StatCard label="In-flight" value={m.inflight} sub="read in the last 5 min" href="#/messages?status=inflight" />
+        <StatCard label="Scheduled" value={m.scheduled} sub="deliver_at in the future" href="#/messages?status=scheduled" />
         <StatCard
           label="Failed"
           value={m.failed}
           sub="exited with Failure"
           tone={m.failed > 0 ? "err" : undefined}
+          href="#/messages?failed=true"
         />
-        <StatCard label="Done" value={m.done} sub="processed messages" />
+        <StatCard label="Done" value={m.done} sub="processed messages" href="#/messages?status=done" />
       </div>
 
       <Card className="mt-3">

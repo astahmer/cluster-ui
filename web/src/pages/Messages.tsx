@@ -69,6 +69,8 @@ export interface MessagesInitialFilters {
   entityType?: string
   entityId?: string
   status?: string
+  /** "true" opens the Failed tab */
+  failed?: string
   q?: string
 }
 
@@ -77,8 +79,9 @@ export interface MessagesInitialFilters {
 export function MessagesPage({ initialFilters }: { initialFilters?: MessagesInitialFilters }) {
   const [data, setData] = React.useState<{ rows: Message[]; total: number } | null>(null)
 
-  const [tab, setTab] = React.useState<string>(initialFilters?.status ?? "")
-  const [status, setStatus] = React.useState<string>(initialFilters?.status ?? "")
+  const initialTab = initialFilters?.failed === "true" ? "failed" : (initialFilters?.status ?? "")
+  const [tab, setTab] = React.useState<string>(initialTab)
+  const [status, setStatus] = React.useState<string>(initialTab === "failed" ? "" : initialTab)
   const [entityType, setEntityType] = React.useState(initialFilters?.entityType ?? "")
   const [entityId, setEntityId] = React.useState(initialFilters?.entityId ?? "")
   const [q, setQ] = React.useState(initialFilters?.q ?? "")
@@ -102,11 +105,18 @@ export function MessagesPage({ initialFilters }: { initialFilters?: MessagesInit
   React.useEffect(() => {
     setEntityType(initialFilters?.entityType ?? "")
     setEntityId(initialFilters?.entityId ?? "")
-    setStatus(initialFilters?.status ?? "")
-    setTab(initialFilters?.status ?? "")
+    const nextStatus = initialFilters?.failed === "true" ? "" : (initialFilters?.status ?? "")
+    setStatus(nextStatus)
+    setTab(initialFilters?.failed === "true" ? "failed" : nextStatus)
     setQ(initialFilters?.q ?? "")
     setPage(1)
-  }, [initialFilters?.entityType, initialFilters?.entityId, initialFilters?.status, initialFilters?.q])
+  }, [
+    initialFilters?.entityType,
+    initialFilters?.entityId,
+    initialFilters?.status,
+    initialFilters?.failed,
+    initialFilters?.q
+  ])
 
   React.useEffect(() => {
     const id = setTimeout(() => {
@@ -273,6 +283,7 @@ export function MessagesPage({ initialFilters }: { initialFilters?: MessagesInit
       <Toolbar className="mb-3 flex-wrap">
         <InputGroup className="w-56">
           <InputGroup.Input
+            aria-label="search messages"
             placeholder="search id / entity / tag…"
             value={q}
             onChange={(e) => setQ(e.target.value)}
@@ -280,6 +291,7 @@ export function MessagesPage({ initialFilters }: { initialFilters?: MessagesInit
           />
         </InputGroup>
         <Input
+          aria-label="filter by entity type"
           placeholder="entity type"
           value={entityType}
           onChange={(e) => {
@@ -289,6 +301,7 @@ export function MessagesPage({ initialFilters }: { initialFilters?: MessagesInit
           className="w-40"
         />
         <Input
+          aria-label="filter by entity id"
           placeholder="entity id"
           value={entityId}
           onChange={(e) => {

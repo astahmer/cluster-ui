@@ -203,15 +203,19 @@ export function makeRedisRepo(url: string): import("./queries.ts").Repo {
     collectJobs(SCAN_WINDOW).then((jobs) => {
       const j = jobs.find((x) => `${x.queue}:${x.jobId}` === id)
       if (!j) return null
+      const view = toMessageView(j)
+      // same envelope shape as the sqlite repo's getMessage
       return {
-        ...toMessageView(j),
-        replies: [],
+        message: view,
+        payload: view.payload,
+        headers: null,
         result:
           j.state === "failed" ?
             { outcome: "failure", error: j.failedReason } :
             j.returnValue !== null && j.returnValue !== undefined ?
             { outcome: "success", value: j.returnValue } :
-            null
+            undefined,
+        replies: []
       }
     })
 

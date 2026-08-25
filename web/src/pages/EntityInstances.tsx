@@ -50,6 +50,7 @@ export function EntityInstancesPage({ entityType }: { entityType: string }) {
           ← all entity types
         </a>
         <Input
+          aria-label="filter instance ids"
           placeholder="filter instance ids…"
           value={q}
           onChange={(e) => setQ(e.target.value)}

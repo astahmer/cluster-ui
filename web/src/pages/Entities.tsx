@@ -46,6 +46,7 @@ export function EntitiesPage() {
     <div>
       <PageHeader title="Entities" subtitle="message activity grouped by entity type">
         <Input
+          aria-label="filter entity types"
           placeholder="filter types…"
           value={q}
           onChange={(e) => setQ(e.target.value)}

@@ -48,6 +48,38 @@ export function StatCard({
   label,
   value,
   sub,
+  tone,
+  href
+}: {
+  label: string
+  value: React.ReactNode
+  sub?: React.ReactNode
+  tone?: "err" | undefined
+  /** when set the whole card deep-links to a filtered view */
+  href?: string
+}) {
+  return (
+    <Card
+      className={cn(
+        tone === "err" && "border-kumo-danger/40",
+        href && "cursor-pointer transition-colors hover:border-kumo-brand/50"
+      )}
+    >
+      {href ? (
+        <a href={href} className="block outline-none focus-visible:ring-2 focus-visible:ring-kumo-brand/50">
+          <StatCardBody label={label} value={value} sub={sub} tone={tone} />
+        </a>
+      ) : (
+        <StatCardBody label={label} value={value} sub={sub} tone={tone} />
+      )}
+    </Card>
+  )
+}
+
+function StatCardBody({
+  label,
+  value,
+  sub,
   tone
 }: {
   label: string
@@ -56,7 +88,7 @@ export function StatCard({
   tone?: "err" | undefined
 }) {
   return (
-    <Card className={tone === "err" ? "border-kumo-danger/40" : undefined}>
+    <>
       <CardHeader className="pb-1">
         <CardTitle>{label}</CardTitle>
       </CardHeader>
@@ -66,7 +98,7 @@ export function StatCard({
         </div>
         {sub && <div className="mt-0.5 text-[12px] text-kumo-subtle">{sub}</div>}
       </CardContent>
-    </Card>
+    </>
   )
 }
 

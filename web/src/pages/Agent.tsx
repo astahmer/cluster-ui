@@ -206,11 +206,13 @@ function AgentPageBody({
           </Select>
           <Input
             type="password"
+            aria-label="API key"
             placeholder="API key (stored locally)"
             value={config.apiKey}
             onChange={(e) => saveConfig({ apiKey: e.target.value })}
           />
           <Input
+            aria-label="model name"
             placeholder={MODEL_PLACEHOLDERS[config.provider]}
             value={config.model}
             onChange={(e) => saveConfig({ model: e.target.value })}

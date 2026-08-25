@@ -143,6 +143,7 @@ function FacetTrigger<T>({
           {allOptions.length > 8 && (
             <input
               autoFocus
+              aria-label={`search ${def.label.toLowerCase()} filter options`}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="search…"
