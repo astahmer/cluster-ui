@@ -194,6 +194,68 @@ async function runChecks() {
   console.log(`${promOk ? "✓" : "✗"} prometheus /metrics exposition`)
   if (!promOk) failures++
 
+  // ---- MCP endpoint (stateless JSON-RPC) -------------------------------
+  const mcpPost = async (payload: unknown) => {
+    const res = await fetch(`http://127.0.0.1:${PORT}/mcp`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload)
+    })
+    return { status: res.status, body: res.status === 202 ? null : await res.json() }
+  }
+  const init = await mcpPost({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} })
+  const initOk =
+    init.status === 200 &&
+    (init.body as any)?.result?.serverInfo?.name === "cluster-ui" &&
+    typeof (init.body as any)?.result?.protocolVersion === "string"
+  console.log(`${initOk ? "✓" : "✗"} mcp initialize`)
+  if (!initOk) failures++
+
+  const toolsList = await mcpPost({ jsonrpc: "2.0", id: 2, method: "tools/list" })
+  const toolNames = ((toolsList.body as any)?.result?.tools ?? []).map((t: any) => t.name)
+  const listOk =
+    toolsList.status === 200 && toolNames.includes("retry_message") && toolNames.includes("query_messages")
+  console.log(`${listOk ? "✓" : "✗"} mcp tools/list (${toolNames.length} tools)`)
+  if (!listOk) failures++
+
+  const qCall = await mcpPost({
+    jsonrpc: "2.0",
+    id: 3,
+    method: "tools/call",
+    params: { name: "query_messages", arguments: { pageSize: 1 } }
+  })
+  let qOk = qCall.status === 200 && (qCall.body as any)?.result?.isError === false
+  if (qOk) {
+    try {
+      const parsed = JSON.parse((qCall.body as any).result.content[0].text)
+      qOk = Array.isArray(parsed.rows) && parsed.rows.length <= 1
+    } catch {
+      qOk = false
+    }
+  }
+  console.log(`${qOk ? "✓" : "✗"} mcp tools/call query_messages`)
+  if (!qOk) failures++
+
+  const badCall = await mcpPost({
+    jsonrpc: "2.0",
+    id: 4,
+    method: "tools/call",
+    params: { name: "retry_message", arguments: { id: "42" } }
+  })
+  const badOk = badCall.status === 200 && (badCall.body as any)?.result?.isError === true
+  console.log(`${badOk ? "✓" : "✗"} mcp unknown-id write -> isError`)
+  if (!badOk) failures++
+
+  // ---- agent stream route (no key -> clean 401) ------------------------
+  const noKey = await fetch(`http://127.0.0.1:${PORT}/api/agent/stream`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ messages: [] })
+  })
+  const noKeyOk = noKey.status === 401
+  console.log(`${noKeyOk ? "✓" : "✗"} agent stream without key -> 401`)
+  if (!noKeyOk) failures++
+
   // unknown cluster
   const badCluster = await fetch(`http://127.0.0.1:${PORT}/api/overview?cluster=nope`)
   const badClusterOk = badCluster.status === 404

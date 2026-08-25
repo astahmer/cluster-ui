@@ -1,17 +1,26 @@
 import { HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "@effect/platform"
 import { Effect, Schedule, Stream } from "effect"
+import { convertToModelMessages, streamText, toUIMessageStream, type LanguageModel, type ToolSet, type UIMessage } from "ai"
+import { createAnthropic } from "@ai-sdk/anthropic"
+import { createOpenAI } from "@ai-sdk/openai"
 import { existsSync, readFileSync } from "node:fs"
 import { join, normalize, resolve } from "node:path"
 import { ActionError, assertWritable, deleteMessage, interruptMessage, resetActivity, retryMessage } from "./actions.ts"
 import { AUTH_COOKIE, verifyToken } from "./auth.ts"
 import * as metrics from "./metrics.ts"
+import { agentTools, callAgentTool } from "./agent-tools.ts"
+import { handleMcpRequest } from "./mcp.ts"
 import { config } from "./config.ts"
+import { makeRedisRepo } from "./redis-repo.ts"
 import { makeRepo, openDb, type MessageQuery, type Repo } from "./queries.ts"
 import { queryRunnerState } from "./singletons.ts"
 
 // ------------------------------------------------------------- cluster registry
 const repos = new Map<string, Repo>(
-  config.clusters.map((c) => [c.name, makeRepo(openDb(c), c.prefix)])
+  config.clusters.map((c) => [
+    c.name,
+    c.kind === "redis" ? makeRedisRepo(c.url) : makeRepo(openDb(c), c.prefix)
+  ])
 )
 const defaultRepo = repos.get(config.clusters[0].name)!
 
@@ -107,30 +116,57 @@ const reqWithBody: Effect.Effect<
   )
 )
 
-function actionHandler(
-  run: (repo: Repo, messageId: string) => { ok: true }
-) {
-  return Effect.map(reqWithBody, (p): HttpServerResponse.HttpServerResponse => {
+type RedisActionMap = Partial<
+  Record<"retry" | "interrupt" | "reset-activity" | "delete", (id: string) => Promise<{ ok: true }>>
+>
+
+/** redis repos carry their own action impls; sqlite goes through actions.ts */
+async function dispatchAction(
+  repo: Repo,
+  redisName: "retry" | "interrupt" | "reset-activity" | "delete",
+  sqliteRun: (repo: Repo, id: string) => { ok: true },
+  messageId: string
+): Promise<{ ok: true }> {
+  if (repo.db === null) {
+    const redisActions = (repo as unknown as { actions?: RedisActionMap }).actions
+    const fn = redisActions?.[redisName]
+    if (!fn) throw new ActionError(`${redisName} not supported for this cluster type`, 400)
     try {
-      assertWritable(config.readonly)
-      const repo = repoFor(p.cluster ?? p.body?.cluster)
-      if (!repo) return notFound("cluster")
-      const messageId = p.body?.messageId
-      if (typeof messageId !== "string" || messageId === "") {
-        return HttpServerResponse.unsafeJson({ error: "messageId is required" }, { status: 400 })
-      }
-      run(repo, messageId)
-      return json({ ok: true })
+      return await fn(messageId)
     } catch (e) {
-      if (e instanceof ActionError) {
-        return HttpServerResponse.unsafeJson({ error: e.message }, { status: e.status })
-      }
-      return HttpServerResponse.unsafeJson(
-        { error: e instanceof Error ? e.message : String(e) },
-        { status: 500 }
-      )
+      throw e instanceof ActionError ? e : new ActionError(String(e))
     }
-  })
+  }
+  return sqliteRun(repo, messageId)
+}
+
+function actionHandler(
+  run: (repo: Repo, messageId: string) => { ok: true },
+  redisName?: "retry" | "interrupt" | "reset-activity" | "delete"
+) {
+  return Effect.flatMap(reqWithBody, (p) =>
+    Effect.tryPromise(async (): Promise<HttpServerResponse.HttpServerResponse> => {
+      try {
+        assertWritable(config.readonly)
+        const repo = repoFor(p.cluster ?? p.body?.cluster)
+        if (!repo) return notFound("cluster")
+        const messageId = p.body?.messageId
+        if (typeof messageId !== "string" || messageId === "") {
+          return HttpServerResponse.unsafeJson({ error: "messageId is required" }, { status: 400 })
+        }
+        await dispatchAction(repo, redisName ?? "retry", run, messageId)
+        return json({ ok: true })
+      } catch (e) {
+        if (e instanceof ActionError) {
+          return HttpServerResponse.unsafeJson({ error: e.message }, { status: e.status })
+        }
+        return HttpServerResponse.unsafeJson(
+          { error: e instanceof Error ? e.message : String(e) },
+          { status: 500 }
+        )
+      }
+    })
+  )
 }
 
 const BULK_ACTIONS = {
@@ -332,24 +368,97 @@ const baseRouter = HttpRouter.empty.pipe(
   ),
 
   // ------------------------------------------------------------------ actions
-  HttpRouter.post("/api/actions/retry", actionHandler((repo, id) => retryMessage(repo.db, repo.prefix, id))),
+  HttpRouter.post("/api/actions/retry", actionHandler((repo, id) => retryMessage(repo.db, repo.prefix, id), "retry")),
   HttpRouter.post(
     "/api/actions/interrupt",
-    actionHandler((repo, id) => interruptMessage(repo.db, repo.prefix, id))
+    actionHandler((repo, id) => interruptMessage(repo.db, repo.prefix, id), "interrupt")
   ),
   HttpRouter.post(
     "/api/actions/reset-activity",
-    actionHandler((repo, id) => resetActivity(repo.db, repo.prefix, id))
+    actionHandler((repo, id) => resetActivity(repo.db, repo.prefix, id), "reset-activity")
   ),
   HttpRouter.post(
     "/api/actions/delete",
-    actionHandler((repo, id) => deleteMessage(repo.db, repo.prefix, id))
+    actionHandler((repo, id) => deleteMessage(repo.db, repo.prefix, id), "delete")
   ),
   HttpRouter.post("/api/actions/bulk", bulkActionHandler)
-
 )
 
-export const api = baseRouter.pipe(
+const agentRouter = HttpRouter.empty.pipe(
+  // ------------------------------------------------------------- agent (MCP + chat)
+  HttpRouter.post(
+    "/mcp",
+    Effect.flatMap(reqWithBody, (p) =>
+      Effect.tryPromise(() => handleMcpRequest(p.body, repoFor)).pipe(
+        Effect.map((outcome) =>
+          HttpServerResponse.unsafeJson(outcome.body, {
+            status: outcome.status,
+            contentType: "application/json"
+          })
+        )
+      )
+    )
+  ),
+
+  HttpRouter.post(
+    "/api/agent/stream",
+    Effect.flatMap(reqWithBody, (p) =>
+      Effect.tryPromise(async () => {
+        const body = p.body ?? {}
+        const apiKey = typeof body.apiKey === "string" ? body.apiKey : ""
+        const provider = body.provider === "anthropic" ? "anthropic" : "openai"
+        const modelId = typeof body.model === "string" && body.model.trim() !== "" ? body.model.trim() : null
+        if (!apiKey) {
+          return HttpServerResponse.unsafeJson({ error: "missing apiKey in request body" }, { status: 401 })
+        }
+        if (!modelId) {
+          return HttpServerResponse.unsafeJson({ error: "missing model in request body" }, { status: 400 })
+        }
+        const repo = repoFor(typeof body.cluster === "string" && body.cluster !== "" ? body.cluster : undefined)
+        if (!repo) return notFound("cluster")
+
+        let model: LanguageModel
+        try {
+          model =
+            provider === "anthropic" ?
+              createAnthropic({ apiKey })(modelId) :
+              createOpenAI({ apiKey })(modelId)
+        } catch (e) {
+          return HttpServerResponse.unsafeJson(
+            { error: `provider init failed: ${e instanceof Error ? e.message : String(e)}` },
+            { status: 400 }
+          )
+        }
+
+        const uiMessages = Array.isArray(body.messages) ? (body.messages as UIMessage[]) : []
+
+        const tools: ToolSet = {}
+        for (const t of agentTools) {
+          tools[t.name] = {
+            description: t.description,
+            inputSchema: t.parameters,
+            execute: (input: unknown) =>
+              callAgentTool(repo, t.name, input).then((r) => (r.ok ? r.result : { error: r.error }))
+          }
+        }
+
+        const result = streamText({
+          model,
+          messages: await convertToModelMessages(uiMessages),
+          tools
+        })
+        return HttpServerResponse.raw(toUIMessageStream(result), {
+          headers: {
+            "content-type": "text/event-stream; charset=utf-8",
+            "cache-control": "no-cache"
+          }
+        })
+      })
+    )
+  )
+)
+
+export const api = HttpRouter.concat(baseRouter, agentRouter).pipe(
   // Prometheus scrape endpoint — outside /api/* so the auth middleware's
   // static exemption covers it (same treatment as /healthz)
   HttpRouter.get(

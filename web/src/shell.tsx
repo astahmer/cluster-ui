@@ -1,5 +1,5 @@
 import * as React from "react"
-import { SquaresFour, Cpu, GridFour, Cube, ClockCounterClockwise, FlowArrow, ListDashes, CirclesThree, List, Stack } from "@phosphor-icons/react"
+import { SquaresFour, Cpu, GridFour, Cube, ClockCounterClockwise, FlowArrow, ListDashes, CirclesThree, List, Stack, Sparkle } from "@phosphor-icons/react"
 import { api } from "./api.ts"
 import * as live from "./live.ts"
 import { useFreshness } from "./freshness.ts"
@@ -102,7 +102,8 @@ const NAV = [
   { to: "/crons", label: "Crons", icon: ClockCounterClockwise },
   { to: "/traces", label: "Traces", icon: Stack },
   { to: "/singletons", label: "Singletons", icon: CirclesThree },
-  { to: "/messages", label: "Messages", icon: ListDashes }
+  { to: "/messages", label: "Messages", icon: ListDashes },
+  { to: "/agent", label: "Agent", icon: Sparkle }
 ]
 
 const NAV_GROUP_CLUSTER = new Set(["/overview", "/runners", "/shards"])

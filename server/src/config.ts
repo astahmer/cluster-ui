@@ -2,8 +2,12 @@
 export interface ClusterProfile {
   /** display name used in the UI switcher and `?cluster=` param */
   readonly name: string
-  /** SQLite database file */
+  /** "sqlite" (default) or "redis" — redis entries point at BullMQ queues */
+  readonly kind: "sqlite" | "redis"
+  /** SQLite database file (sqlite clusters) */
   readonly dbFile: string
+  /** redis connection url (redis clusters) */
+  readonly url: string
   /** table prefix used when the cluster storages were created */
   readonly prefix: string
 }
@@ -12,12 +16,14 @@ export interface ClusterProfile {
  * Cluster registry: `CLUSTER_UI_CLUSTERS="name=path[:prefix],name2=path2[:prefix2]"`.
  * Falls back to a single cluster named "default" from CLUSTER_UI_DB/CLUSTER_UI_PREFIX.
  */
-function parseClusters(): ReadonlyArray<ClusterProfile> {
+export function parseClusters(): ReadonlyArray<ClusterProfile> {
   const raw = process.env.CLUSTER_UI_CLUSTERS
   if (!raw?.trim()) {
     const profile: ClusterProfile = {
       name: "default",
+      kind: "sqlite",
       dbFile: process.env.CLUSTER_UI_DB ?? "./data/cluster.db",
+      url: "",
       prefix: process.env.CLUSTER_UI_PREFIX ?? "cluster"
     }
     return [profile]
@@ -34,10 +40,15 @@ function parseClusters(): ReadonlyArray<ClusterProfile> {
       // "path:prefix" only counts as a split when the part after ":" has no path separator
       const looksLikePrefix =
         colon !== -1 && !rest.slice(colon + 1).includes("/") && rest.slice(colon + 1).length > 0
+      const target = looksLikePrefix ? rest.slice(0, colon) : rest
+      const prefix = looksLikePrefix ? rest.slice(colon + 1) : process.env.CLUSTER_UI_PREFIX ?? "cluster"
+      const isRedis = target.startsWith("redis://") || target.startsWith("rediss://")
       return {
         name: name || "default",
-        dbFile: looksLikePrefix ? rest.slice(0, colon) : rest,
-        prefix: looksLikePrefix ? rest.slice(colon + 1) : process.env.CLUSTER_UI_PREFIX ?? "cluster"
+        kind: isRedis ? "redis" : "sqlite",
+        dbFile: isRedis ? "" : target,
+        url: isRedis ? target : "",
+        prefix
       }
     })
 }

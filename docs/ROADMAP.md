@@ -70,43 +70,33 @@ Build two views on shared primitives:
    types, total duration, outcome); detail = waterfall ordered by snowflake-derived
    timestamps, colored by message kind/status; keep external trace-url link.
 
-## 5. MCP + agent page (planned)
+## 5. MCP + agent page (SHIPPED v5)
 
-Goal: "ask what happened / make actions" directly against the cluster.
+- `server/src/agent-tools.ts` — one shared registry of 12 tools (8 read + 4 write),
+  zod-4 schemas, write tools gated by CLUSTER_UI_READONLY.
+- `POST /mcp` — hand-rolled stateless MCP streamable-http JSON-RPC (initialize /
+  tools/list / tools/call), no SDK dep; any MCP client can attach.
+- `POST /api/agent/stream` — ai-sdk v7 `streamText` over the same registry; BYOK key
+  arrives per-request in the body and is never persisted.
+- Agent page (`#/agent`) — @ai-sdk/react useChat on kumo primitives: provider/key/
+  model/cluster settings persisted locally, streaming transcript, collapsible
+  tool-call cards with deep links into Messages/Workflows/Crons/Traces/Singletons.
+- Vendored from dadabase's @emi/core fork: `web/src/agent/{protocol,chat}` (zod wire
+  model + ui-message helpers) so tool-part shapes stay compatible for a future full
+  runtime adoption. The xstate actor system is NOT vendored yet — revisit when
+  thread persistence lands (see emi-healthfit plans/core-storage-agnostic.md).
 
-Design: ship a small MCP server (`cluster-ui-mcp`) exposing read tools backed by the
-same repo layer as the API, plus write tools gated by CLUSTER_UI_READONLY:
+## 6. Redis support (v1 SHIPPED, v2 ideas below)
 
-```
-tools: overview | query_messages(filters) | get_message(id) | get_workflow_run(...) |
-       list_crons | list_singletons | retry_message(id) | interrupt_message(id) |
-       delete_message(id) | reset_activity(id)
-resources: cluster-ui://overview, cluster-ui://messages/{query}
-prompts: "what happened in the last hour?", "why is X failing?"
-```
+Shipped: `CLUSTER_UI_CLUSTERS="name=redis://host:6379"` entries become redis clusters
+(`kind` field added to ClusterProfile; parseClusters exported). `server/src/redis-repo.ts`
+maps BullMQ job hashes onto the Message shape (overview counts, messages list/detail,
+queue entities); all calls race a 1.5s timeout; SCAN only (never KEYS); workflows/shards/
+crons/traces degrade to empty states. retry/delete actions route through repo.actions;
+interrupt/reset are sqlite-only for now.
 
-UI side: an "Agent" page that talks to a model with these tools mounted (BYOK key,
-same pattern as dadabase chat), streaming answers with tool-call cards that deep-link
-into pages (#/messages?id=…). Server transport: streamable HTTP at `/mcp` so any MCP
-client (Claude Desktop, opencode, pi) can attach without the built-in chat.
-
-## 6. Redis integration (side bonus, planned)
-
-Scope: make cluster-ui ALSO usable as a generic Redis queue dashboard, without
-entangling it with the Effect-cluster storage path.
-
-Design:
-- Connection model: second connection kind `redis` in the cluster registry —
-  `CLUSTER_UI_CLUSTERS="name=redis://host:6379"` alongside sqlite paths.
-- Read path: scan queues via `KEYS bull:*:id`-style patterns (BullMQ conventions),
-  map job hashes → the same Message shape we render today (state boards, payloads,
-  attempts, failure reasons).
-- Write path: reuse existing action buttons where semantics match (retry = re-enqueue,
-  delete = remove), guarded by the same readonly flag.
-- Metrics: sampler gains a redis series (queue depths, oldest-job age).
-- Explicit non-goals v1: BullMQ Pro flows/parent-child DAG rendering, repeatable-job
-  editor; show them read-only if encountered.
-- Deps: `ioredis`; lazy-loaded module so non-redis installs don't pay for it.
+v2 ideas: metrics sampler redis series (queue depths, oldest-job age), BullMQ Pro flow
+DAG view, repeatable-job listing, per-queue pause indicator.
 
 ## 7. Execution order
 

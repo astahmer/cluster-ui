@@ -123,6 +123,13 @@ window.IntersectionObserver ??= class {
   disconnect() {}
   takeRecords() { return [] }
 }
+// web-stream globals the ai-sdk bundle expects at module-eval time (jsdom lacks them)
+import { TransformStream, TextDecoderStream, TextEncoderStream } from "node:stream/web"
+window.TransformStream ??= TransformStream
+window.TextDecoderStream ??= TextDecoderStream
+window.TextEncoderStream ??= TextEncoderStream
+window.ReadableStream ??= globalThis.ReadableStream
+window.WritableStream ??= globalThis.WritableStream
 window.EventSource = class {
   constructor() {
     setTimeout(() => this.onerror?.(new Event("error")), 0)
