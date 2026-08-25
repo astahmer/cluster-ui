@@ -202,6 +202,37 @@ async function runVariant(label, clusterParam) {
     }
   }
 
+  // --- queues page (redis: controls; sqlite: empty state) ---
+  await goto("/queues", 1200)
+  const qText = await bodyText()
+  check(`[${label}] queues page renders`, label === "redis" ? qText.includes("payments") : qText.includes("redis-backed"))
+  check(`[${label}] queues no page errors`, errors.length === 0)
+
+  // --- traces: seeded cascades + in-page waterfall panel ---
+  await goto("/traces", 1500)
+  const traceRow = page.locator("table tbody tr").first()
+  // redis variant carries no trace data — expect the empty state there
+  check(`[${label}] traces list renders`, label === "redis" ? (await bodyText()).includes("No traces yet") : (await traceRow.count()) > 0)
+  if ((await traceRow.count()) > 0) {
+    // open the multi-span checkout cascade (7 spans) rather than whatever is newest
+    const cascadeRow = page.locator("table tbody tr", { hasText: "ApiGateway" }).first()
+    await (await cascadeRow.count() > 0 ? cascadeRow : traceRow).click()
+    await page.waitForTimeout(1200)
+    const panelText = await bodyText()
+    check(`[${label}] trace side panel opens with waterfall`, panelText.includes("waterfall") && (await page.locator(".fixed.inset-0").count()) > 0)
+    // multi-span seeded traces must draw overlapping duration bars, not point markers
+    if (label === "sqlite") {
+      const bars = await page.locator(".fixed.inset-0 .relative.h-4.flex-1 span.rounded-sm").count()
+      check(`[sqlite] waterfall draws duration bars`, bars >= 3)
+    }
+    check(`[${label}] trace panel no page errors`, errors.length === 0)
+    if (errors.length > 0) console.log("   ", errors.slice(0, 3))
+    await page.screenshot({ path: `/tmp/cluster-ui-shots/trace-panel-${label}.png` })
+    await page.keyboard.press("Escape")
+    await page.waitForTimeout(400)
+    check(`[${label}] Escape closes trace panel`, (await page.locator(".fixed.inset-0").count()) === 0)
+  }
+
   // --- agent + mcp pages render ---
   await goto("/agent", 1200)
   check(`[${label}] agent page renders`, (await bodyText()).includes("Ask about your cluster"))

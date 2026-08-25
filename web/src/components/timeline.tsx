@@ -1,6 +1,6 @@
 import * as React from "react"
 import { cn } from "../kumo"
-import { fmtDuration, fmtTime } from "../format.ts"
+import { fmtTime } from "../format.ts"
 
 /**
  * Span-waterfall / Gantt timeline (shared time axis, labeled duration bars),
@@ -29,9 +29,9 @@ const TONE_BAR: Record<NonNullable<TimelineSpan["tone"]>, string> = {
   warning: "bg-kumo-warning"
 }
 
-/** nice round step for ~5 ticks across a range (ms) */
+/** nice round step for ~4 ticks across a range (ms) */
 function tickStep(rangeMs: number): number {
-  const raw = rangeMs / 5
+  const raw = rangeMs / 4
   const pow = Math.pow(10, Math.floor(Math.log10(Math.max(raw, 1))))
   const norm = raw / pow
   const mult = norm >= 5 ? 5 : norm >= 2 ? 2 : 1
@@ -44,6 +44,13 @@ function niceTicks(t0: number, t1: number): number[] {
   const ticks: number[] = []
   for (let t = Math.ceil(t0 / step) * step; t <= t1; t += step) ticks.push(t)
   return ticks
+}
+
+/** sub-second-precise label for waterfall axis ticks (fmtDuration rounds to whole seconds) */
+function axisLabel(ms: number): string {
+  if (ms <= 0) return "0"
+  if (ms < 1000) return `+${Math.round(ms)}ms`
+  return `+${(ms / 1000).toFixed(1)}s`
 }
 
 export function SpanWaterfall({
@@ -80,17 +87,17 @@ export function SpanWaterfall({
 
   return (
     <div className="overflow-x-auto rounded-md border border-kumo-line">
-      <div className="min-w-[640px]">
+      <div className="min-w-[520px]">
         {/* shared time axis */}
         <div className="relative border-b border-kumo-line bg-kumo-recessed px-3 py-1.5">
-          <div className="relative ml-[220px] h-4">
+          <div className="relative ml-[208px] h-4">
             {ticks.map((t) => (
               <span
                 key={t}
                 className="absolute top-0 -translate-x-1/2 text-[10px] tabular-nums text-kumo-inactive"
                 style={{ left: `${pct(t)}%` }}
               >
-                {t - t0 === 0 ? "0" : `+${fmtDuration(t - t0)}`}
+                {t - t0 === 0 ? "0" : axisLabel(t - t0)}
               </span>
             ))}
           </div>
@@ -109,7 +116,7 @@ export function SpanWaterfall({
             const left = pct(s.startMs)
             const width = Math.max(pct(Math.max(s.endMs, s.startMs + 1)) - left, 0.75)
             const tip = `${typeof s.label === "string" || typeof s.label === "number" ? s.label : "span"} · ${fmtTime(s.startMs)}${
-              zeroDur ? "" : ` → ${fmtDuration(s.endMs - s.startMs)}`
+              zeroDur ? "" : ` → ${axisLabel(s.endMs - s.startMs).replace(/^\+/, "")}`
             }`
 
             return (

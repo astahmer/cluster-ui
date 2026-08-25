@@ -46,6 +46,7 @@ export interface Message {
   entityId: string
   kind: string
   tag: string | null
+  headers: string | null
   traceId: string | null
   processed: boolean
   status: MessageStatus
@@ -298,10 +299,16 @@ export interface ReporterSingletonInfo {
   startedAt?: number | string | null
 }
 
+export interface QueueInfo {
+  name: string
+  paused: boolean
+}
+
 export interface TraceSummary {
   traceId: string
   count: number
   kinds: string[]
+  services: string[]
   firstAt: number
   lastAt: number
 }
@@ -370,6 +377,12 @@ export const api = {
     ),
   crons: () => get<CronJob[]>("/api/crons"),
   traces: () => get<TraceSummary[]>("/api/traces"),
+  queues: (q?: { cluster?: string }) =>
+    get<QueueInfo[]>("/api/queues" + (q?.cluster ? `?cluster=${encodeURIComponent(q.cluster)}` : "")),
+  pauseQueue: (queue: string, cluster?: string) =>
+    post<{ ok: true }>("/api/actions/pause-queue", { queue, ...(cluster ? { cluster } : {}) }),
+  resumeQueue: (queue: string, cluster?: string) =>
+    post<{ ok: true }>("/api/actions/resume-queue", { queue, ...(cluster ? { cluster } : {}) }),
   jobTree: (id: string) => get<JobTreeNode>(`/api/job-tree/${encodeURIComponent(id)}`),
   trace: (traceId: string) =>
     get<{ traceId: string; rows: Message[] }>(`/api/traces/${encodeURIComponent(traceId)}`),

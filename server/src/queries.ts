@@ -53,6 +53,7 @@ export interface MessageView {
   entityId: string
   kind: string
   tag: string | null
+  headers: string | null
   traceId: string | null
   processed: boolean
   status: MessageStatus
@@ -62,6 +63,15 @@ export interface MessageView {
   createdAt: number
   machineId: number
   replyCount: number
+}
+
+export interface TraceSummary {
+  traceId: string
+  count: number
+  kinds: string[]
+  services: string[]
+  firstAt: number
+  lastAt: number
 }
 
 interface RawMessageRow {
@@ -102,6 +112,7 @@ function toMessageView(row: RawMessageRow): MessageView {
     entityId: row.entity_id,
     kind: kindName(Number(row.kind)),
     tag: row.tag ?? null,
+    headers: row.headers ?? null,
     traceId: row.trace_id ?? null,
     processed: Number(row.processed) === 1,
     status: statusOf({
@@ -575,12 +586,13 @@ export function makeRepo(db: Database.Database, prefix: string = config.prefix) 
   }
 
   /** Recent traces: non-null trace_ids grouped, newest message first. */
-  const traces = (limit = 50) => {
+  const traces = (limit = 50): TraceSummary[] => {
     const rows = db
       .prepare(
         `SELECT m.trace_id as traceId, COUNT(*) as count,
            MIN(m.id) as firstId, MAX(m.id) as lastId,
-           GROUP_CONCAT(DISTINCT m.kind) as kinds
+           GROUP_CONCAT(DISTINCT m.kind) as kinds,
+           GROUP_CONCAT(DISTINCT m.entity_type) as services
          FROM ${t.messages} m
          WHERE m.trace_id IS NOT NULL AND m.trace_id != ''
          GROUP BY m.trace_id
@@ -593,6 +605,7 @@ export function makeRepo(db: Database.Database, prefix: string = config.prefix) 
       firstId: number | bigint
       lastId: number | bigint
       kinds: string | null
+      services: string | null
     }>
     return rows.map((r) => ({
       traceId: r.traceId,
@@ -603,6 +616,11 @@ export function makeRepo(db: Database.Database, prefix: string = config.prefix) 
           .split(",")
           .filter((k) => k !== "")
           .map((k) => kindName(Number(k))),
+      services:
+        r.services === null ? [] :
+        String(r.services)
+          .split(",")
+          .filter((s) => s !== ""),
       firstAt: decodeSnowflake(String(r.firstId)).createdAt,
       lastAt: decodeSnowflake(String(r.lastId)).createdAt
     }))

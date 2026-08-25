@@ -357,10 +357,10 @@ export function MessagesPage({ initialFilters }: { initialFilters?: MessagesInit
 
         <span className="ml-auto flex items-center gap-1">
           <Button variant="ghost" size="sm" disabled={rows.length === 0} onClick={() => downloadJson(exportRows(), "messages.json")}>
-            export json
+            export page (json)
           </Button>
           <Button variant="ghost" size="sm" disabled={rows.length === 0} onClick={() => downloadCsv(exportRows(), "messages.csv")}>
-            export csv
+            export page (csv)
           </Button>
         </span>
       </Toolbar>
@@ -522,7 +522,7 @@ function MessageRow({
         {scheduledView && m.deliverAt !== null ? (
           <span title={fmtTime(m.deliverAt)}>{fmtCountdown(m.deliverAt)}</span>
         ) : (
-          relTime(m.createdAt)
+          <span title={fmtTime(m.createdAt)}>{relTime(m.createdAt)}</span>
         )}
       </TD>
       <TD>

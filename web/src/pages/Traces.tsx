@@ -2,27 +2,34 @@ import * as React from "react"
 import { Stack } from "@phosphor-icons/react"
 import { api, type Message, type TraceSummary } from "../api.ts"
 import { Badge, Table, TBody, TD, TH, THead, TR } from "../components/ui.tsx"
-import { StatusBadge } from "../components/pieces.tsx"
+import { DetailPanel, SkeletonTable, StatusBadge } from "../components/pieces.tsx"
 import { SpanWaterfall, type TimelineSpan } from "../components/timeline.tsx"
-import { ErrorNote, PageHeader, useLive } from "../shell.tsx"
+import { ErrorNote, PageHeader, useEscToClose, useLive } from "../shell.tsx"
 import { Empty } from "../kumo"
 import { fmtTime } from "../format.ts"
 
 /**
  * Traces — messages grouped by trace id.
- * List: recent traces with span counts. Detail (#/traces/<id>): span waterfall
- * ordered by snowflake-derived timestamps (see docs/ROADMAP.md §4).
+ * List: recent traces with span counts; clicking a row opens the span
+ * waterfall in an in-page side panel (no navigation). The dedicated
+ * #/traces/<id> view shares the same body via TraceDetailBody
+ * (see docs/ROADMAP.md §4).
  */
 
 export function TracesPage() {
   const [traces, setTraces] = React.useState<TraceSummary[]>([])
+  const [openTraceId, setOpenTraceId] = React.useState<string | null>(null)
   const { loading, error, refresh } = useLive(async () => setTraces(await api.traces()))
 
-  if (loading && traces.length === 0) return null
+  useEscToClose(() => setOpenTraceId(null))
+
+  if (loading && traces.length === 0) return <SkeletonTable />
 
   return (
     <div>
-      <PageHeader title="Traces" subtitle="messages grouped by trace id — newest first" />
+      <PageHeader title="Traces" subtitle="messages grouped by trace id — newest first">
+        <span className="text-[12px] text-kumo-subtle">click a trace for its waterfall</span>
+      </PageHeader>
       <ErrorNote error={error} onRetry={refresh} />
 
       <div className="rounded-lg border border-kumo-line bg-kumo-base">
@@ -31,7 +38,7 @@ export function TracesPage() {
             <TR>
               <TH>Trace ID</TH>
               <TH className="text-right">Spans</TH>
-              <TH>Kinds</TH>
+              <TH>Services</TH>
               <TH>First span</TH>
               <TH>Last span</TH>
               <TH className="text-right">Duration</TH>
@@ -41,11 +48,13 @@ export function TracesPage() {
             {traces.map((t) => {
               const short = t.traceId.length > 16 ? `${t.traceId.slice(0, 13)}…` : t.traceId
               return (
-                <TR key={t.traceId}>
+                <TR key={t.traceId} className="cursor-pointer hover:bg-kumo-recessed/60" onClick={() => setOpenTraceId(t.traceId)}>
                   <TD>
                     <a
                       href={`#/traces/${encodeURIComponent(t.traceId)}`}
-                      className="font-mono text-[12px] font-medium hover:text-kumo-link hover:underline"
+                      onClick={(e) => e.stopPropagation()}
+                      title={t.traceId}
+                      className="font-mono text-[12px] font-medium underline-offset-2 hover:text-kumo-link hover:underline"
                     >
                       {short}
                     </a>
@@ -53,7 +62,7 @@ export function TracesPage() {
                   <TD className="text-right tabular-nums">{t.count}</TD>
                   <TD>
                     <div className="flex flex-wrap gap-1">
-                      {(t.kinds.length > 0 ? t.kinds : ["—"]).map((k) => (
+                      {(t.services.length > 0 ? t.services : ["—"]).map((k) => (
                         <Badge key={k} tone="info">
                           {k}
                         </Badge>
@@ -62,7 +71,7 @@ export function TracesPage() {
                   </TD>
                   <TD className="text-kumo-subtle">{fmtTime(t.firstAt)}</TD>
                   <TD className="text-kumo-subtle">{fmtTime(t.lastAt)}</TD>
-                  <TD className="text-right tabular-nums">{formatDuration(t.lastAt - t.firstAt)}</TD>
+                  <TD className="text-right tabular-nums">{formatDuration(traceDurationHint(t))}</TD>
                 </TR>
               )
             })}
@@ -76,11 +85,50 @@ export function TracesPage() {
           />
         )}
       </div>
+
+      <DetailPanel
+        open={openTraceId !== null}
+        onClose={() => setOpenTraceId(null)}
+        title={
+          <span className="flex items-center gap-2">
+            <span className="font-mono text-xs">trace {openTraceId && shortId(openTraceId)}</span>
+            {openTraceId && (
+              <a
+                href={`#/traces/${encodeURIComponent(openTraceId)}`}
+                className="text-[11px] text-kumo-subtle underline-offset-2 hover:text-kumo-link hover:underline"
+                onClick={() => setOpenTraceId(null)}
+              >
+                open full page ↗
+              </a>
+            )}
+          </span>
+        }
+      >
+        {openTraceId !== null && <TraceDetailBody traceId={openTraceId} compact />}
+      </DetailPanel>
     </div>
   )
 }
 
+/** Dedicated #/traces/<id> page — wraps the shared body with page chrome. */
 export function TraceDetailPage({ traceId }: { traceId: string }) {
+  return (
+    <div>
+      <PageHeader title={`Trace ${shortId(traceId)}`} subtitle="span waterfall, oldest first">
+        <a href="#/traces" className="text-[13px] text-kumo-subtle hover:text-kumo-default">
+          ← all traces
+        </a>
+      </PageHeader>
+      <TraceDetailBody traceId={traceId} />
+    </div>
+  )
+}
+
+/**
+ * Shared trace body: waterfall + span table. `compact` drops the table so the
+ * side panel stays focused on the cascade.
+ */
+function TraceDetailBody({ traceId, compact }: { traceId: string; compact?: boolean }) {
   const [rows, setRows] = React.useState<Message[] | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const { refresh } = useLive(async () => {
@@ -94,31 +142,30 @@ export function TraceDetailPage({ traceId }: { traceId: string }) {
   }, [traceId])
 
   const spans = toSpans(rows ?? [])
-  const totalMs = rows && rows.length >= 2 ? spans[spans.length - 1].endMs - spans[0].startMs : 0
+  const totalMs = spans.length >= 2 ? Math.max(...spans.map((s) => s.endMs)) - Math.min(...spans.map((s) => s.startMs)) : 0
 
   return (
     <div>
-      <PageHeader title={`Trace ${traceId}`} subtitle={`${rows?.length ?? 0} spans`}>
-        <a href="#/traces" className="text-[13px] text-kumo-subtle hover:text-kumo-default">
-          ← all traces
-        </a>
-      </PageHeader>
       <ErrorNote error={error} onRetry={refresh} />
 
-      {rows === null ? null : rows.length < 2 ? (
+      {rows === null ? (
+        <SkeletonTable />
+      ) : rows.length < 2 ? (
         <div className="rounded-lg border border-kumo-line px-4 py-6 text-center text-[13px] text-kumo-subtle">
           Not enough timed spans in this trace for a waterfall.
         </div>
       ) : (
         <div className="rounded-lg border border-kumo-line bg-kumo-base p-3">
           <div className="mb-2 flex items-center justify-between text-[11px] text-kumo-subtle">
-            <span>waterfall — {formatDuration(totalMs)} total</span>
+            <span>
+              waterfall — {formatDuration(totalMs)} total · {rows.length} spans
+            </span>
           </div>
           <SpanWaterfall spans={spans} />
         </div>
       )}
 
-      {rows !== null && rows.length > 0 && (
+      {!compact && rows !== null && rows.length > 0 && (
         <div className="mt-3 rounded-lg border border-kumo-line bg-kumo-base">
           <Table>
             <THead>
@@ -154,27 +201,34 @@ export function TraceDetailPage({ traceId }: { traceId: string }) {
 
 function toSpans(rows: ReadonlyArray<Message>): TimelineSpan[] {
   const sorted = [...rows].sort((a, b) => a.createdAt - b.createdAt)
-  // derive an end from the next span's start (span lasts until its successor),
-  // last span gets a nominal duration so it renders as a bar
+  // prefer the real span duration recorded in headers (`spanDurationMs`, as the
+  // engine/OTel bridge writes it); fall back to deriving an end from the next
+  // span's start, with a nominal bar for the last span
   return sorted.map((m, i) => {
     const next = sorted[i + 1]
-    const endMs = next ? Math.max(next.createdAt, m.createdAt + 1) : m.createdAt + Math.max(totalHint(sorted), 250)
+    let durMs: number | null = null
+    try {
+      const h = m.headers !== null ? (JSON.parse(m.headers) as Record<string, unknown>) : null
+      const d = h?.spanDurationMs
+      if (typeof d === "number" && Number.isFinite(d) && d > 0) durMs = d
+    } catch {
+      // malformed headers → heuristic fallback
+    }
+    const endMs =
+      durMs !== null ? m.createdAt + durMs : next ? Math.max(next.createdAt, m.createdAt + 1) : m.createdAt + Math.max(totalHint(sorted), 250)
     return {
       key: m.id,
-      label:
-        m.entityId ? (
-          <>
-            <span className="font-medium">{m.entityType}</span>
-            <span className="text-kumo-inactive">/{m.entityId}</span>
-          </>
-        ) : (
-          m.entityType || m.kind
-        ),
-      group: m.kind,
+      label: (
+        <>
+          <span className="font-medium">{m.tag || m.entityType}</span>
+          {m.tag && m.entityType && <span className="text-kumo-inactive"> · {m.entityType}</span>}
+        </>
+      ),
+      group: m.entityType,
       startMs: m.createdAt,
       endMs,
-      tone: m.status === "done" ? "success" : "default",
-      badge: m.tag || undefined
+      tone: m.failed ? "danger" : m.status === "done" ? "success" : "default",
+      badge: undefined
     }
   })
 }
@@ -182,6 +236,15 @@ function toSpans(rows: ReadonlyArray<Message>): TimelineSpan[] {
 function totalHint(sorted: ReadonlyArray<Message>): number {
   if (sorted.length < 2) return 250
   return Math.max(250, sorted[sorted.length - 1].createdAt - sorted[0].createdAt)
+}
+
+/** list-row duration hint: first→last creation window (real durations live per-span) */
+function traceDurationHint(t: TraceSummary): number {
+  return t.lastAt - t.firstAt
+}
+
+function shortId(id: string): string {
+  return id.length > 16 ? `${id.slice(0, 13)}…` : id
 }
 
 function formatDuration(ms: number): string {

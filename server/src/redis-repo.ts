@@ -1,7 +1,7 @@
 import Redis from "ioredis"
 import { ActionError, assertWritable } from "./actions.ts"
 import { config } from "./config.ts"
-import type { MessageQuery } from "./queries.ts"
+import type { MessageQuery, TraceSummary } from "./queries.ts"
 
 /**
  * Redis (BullMQ) read model — docs/ROADMAP.md §6.
@@ -484,7 +484,7 @@ export function makeRedisRepo(url: string): import("./queries.ts").Repo {
     workflows: () => allSync([]),
     workflowRuns: (_name: string) => allSync([]),
     workflowRun: (_name: string, _executionId: string) => allSync(null),
-    traces: (_limit?: number) => allSync([]),
+    traces: (_limit?: number) => allSync([] as TraceSummary[]),
     trace: (_traceId: string) => allSync([]),
     queues: () => queues(),
     jobTree: (id: string) => jobTree(id),

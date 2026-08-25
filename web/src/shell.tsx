@@ -1,5 +1,5 @@
 import * as React from "react"
-import { SquaresFour, Cpu, GridFour, Cube, ClockCounterClockwise, FlowArrow, ListDashes, CirclesThree, List, Stack, Sparkle, Plugs, MagnifyingGlass } from "@phosphor-icons/react"
+import { SquaresFour, Cpu, GridFour, Cube, ClockCounterClockwise, FlowArrow, ListDashes, CirclesThree, List, Stack, Sparkle, Plugs, MagnifyingGlass, QueueIcon } from "@phosphor-icons/react"
 import { api } from "./api.ts"
 import * as live from "./live.ts"
 import { useFreshness } from "./freshness.ts"
@@ -101,6 +101,7 @@ const NAV = [
   { to: "/workflows", label: "Workflows", icon: FlowArrow },
   { to: "/crons", label: "Crons", icon: ClockCounterClockwise },
   { to: "/traces", label: "Traces", icon: Stack },
+  { to: "/queues", label: "Queues", icon: QueueIcon },
   { to: "/singletons", label: "Singletons", icon: CirclesThree },
   { to: "/messages", label: "Messages", icon: ListDashes },
   { to: "/agent", label: "AI Chat", icon: Sparkle },
@@ -108,7 +109,7 @@ const NAV = [
 ]
 
 const NAV_GROUP_CLUSTER = new Set(["/overview", "/runners", "/shards"])
-const NAV_GROUP_WORK = new Set(["/entities", "/workflows", "/crons", "/traces", "/singletons", "/messages"])
+const NAV_GROUP_WORK = new Set(["/entities", "/workflows", "/crons", "/queues", "/traces", "/singletons", "/messages"])
 
 function FreshnessIndicator() {
   const { secondsAgo } = useFreshness()
@@ -250,7 +251,7 @@ export function Shell({ route, children }: { route: string; children: React.Reac
         key: n.to,
         label: `Go to ${n.label}`,
         keywords: n.to,
-        hint: String(NAV.findIndex((x) => x.to === n.to) + 1),
+        hint: NAV.findIndex((x) => x.to === n.to) < 9 ? String(NAV.findIndex((x) => x.to === n.to) + 1) : undefined,
         run: () => navigate(n.to)
       })),
       {
@@ -326,11 +327,13 @@ export function Shell({ route, children }: { route: string; children: React.Reac
       if (typing || e.metaKey || e.ctrlKey || e.altKey) return
       if (e.key === "/") {
         e.preventDefault()
-        ;(document.querySelector("[data-search-input]") as HTMLInputElement | null)?.focus()
+        const search = document.querySelector("[data-search-input]") as HTMLInputElement | null
+        if (search) search.focus()
+        else setPaletteOpen(true)
         return
       }
       const idx = Number(e.key)
-      if (Number.isInteger(idx) && idx >= 1 && idx <= NAV.length) {
+      if (Number.isInteger(idx) && idx >= 1 && idx <= Math.min(NAV.length, 9)) {
         navigate(NAV[idx - 1].to)
       }
     }
@@ -437,7 +440,7 @@ function SidebarContent({ base, onNavigate }: { base: string; onNavigate?: () =>
         <div className="border-t border-kumo-line px-4 py-3 text-[11px] leading-4 text-kumo-subtle">
           reads the cluster's SQL storage
           <br />
-          <span className="text-kumo-inactive">1–{NAV.length} switch · / search · esc close</span>
+          <span className="text-kumo-inactive">1–9 switch · ⌘K palette · / search · esc close</span>
         </div>
     </>
   )

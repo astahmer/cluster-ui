@@ -4,6 +4,7 @@ import { api, type RunnerReport } from "../api.ts"
 import { RunnerRuntimePanel } from "../components/runner-state.tsx"
 import { Badge, Table, TBody, TD, TH, THead, TR } from "../components/ui.tsx"
 import { ErrorNote, PageHeader, useRoute, useLive } from "../shell.tsx"
+import { SkeletonTable } from "../components/pieces.tsx"
 import { Empty, Tabs, Tooltip } from "../kumo"
 import { FilterBar, presenceFacet, useFacets, type FacetDef } from "../components/filters/index.tsx"
 /**
@@ -25,7 +26,7 @@ export function SingletonsPage() {
   ]
   const facets = useFacets(runners, facetDefs)
 
-  if (loading && runners.length === 0) return null
+  if (loading && runners.length === 0) return <SkeletonTable />
 
   const reporting = runners.filter((r) => r.state)
   const totalSingletons = reporting.reduce((acc, r) => acc + (r.state?.singletons?.length ?? 0), 0)

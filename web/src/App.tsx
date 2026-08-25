@@ -12,6 +12,7 @@ import { SingletonsPage } from "./pages/Singletons.tsx"
 import { TracesPage, TraceDetailPage } from "./pages/Traces.tsx"
 import { AgentPage } from "./pages/Agent.tsx"
 import { McpPage } from "./pages/Mcp.tsx"
+import { QueuesPage } from "./pages/Queues.tsx"
 
 /**
  * MessagesPage will accept these once W2 lands (CONTRACT.md); the cast keeps
@@ -94,11 +95,21 @@ export function App() {
       case "mcp":
         content = <McpPage />
         break
+      case "queues":
+        content = <QueuesPage />
+        break
       case "overview":
         content = <OverviewPage />
         break
       default:
-        content = <ErrorNote error={`unknown route: ${route.path}`} />
+        content = (
+          <div className="space-y-2">
+            <ErrorNote error={`unknown route: ${route.path}`} />
+            <a href="#/overview" className="text-[13px] text-kumo-link hover:underline">
+              ← back to overview
+            </a>
+          </div>
+        )
     }
   } catch (e) {
     content = <ErrorNote error={String(e)} />

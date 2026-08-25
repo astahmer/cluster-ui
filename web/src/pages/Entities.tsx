@@ -31,7 +31,6 @@ export function EntitiesPage() {
     },
     presenceFacet("hasScheduled", "scheduled", (r) => r.scheduled > 0),
     presenceFacet("hasInflight", "in-flight", (r) => r.inflight > 0),
-    presenceFacet("hasScheduled", "scheduled", (r) => r.scheduled > 0)
   ]
   const facets = useFacets(rows, facetDefs)
 

@@ -134,8 +134,10 @@ function baseMessage(opts: {
     tag: opts.tag,
     payload: JSON.stringify(opts.payload),
     headers: JSON.stringify({ "x-attempt": "1" }),
-    trace_id: Math.floor(Math.random() * 0xffffffffffffffff).toString(16).padStart(16, "0"),
-    span_id: Math.floor(Math.random() * 0xffffffffffff).toString(16).padStart(12, "0"),
+    // no trace by default — only spans seeded via addTrace carry trace ids,
+    // so the Traces page shows real multi-span cascades instead of noise
+    trace_id: null,
+    span_id: null,
     sampled: 1,
     processed: opts.processed ? 1 : 0,
     request_id: Number(BigInt(opts.id) & 0xffffffffn),
@@ -462,8 +464,116 @@ const seed = db.transaction(() => {
         hoursAgo: 0.01
       })
     )
-    mid++
+        mid++
   }
+
+  // ---- distributed traces -----------------------------------------------------
+  // Multi-span traces: messages sharing a trace_id whose ids are created ms
+  // apart, so the Traces waterfall renders a real cascade. Each span's true
+  // duration rides in its headers JSON (`spanDurationMs`) — the UI reads it
+  // back to draw overlapping bars (otel-style) instead of deriving ends from
+  // successor starts.
+  let traceCounter = 0
+  const addTrace = (
+    spans: Array<{
+      service: string // entity_type
+      entity: string // entity_id
+      op: string // tag
+      atMs: number // offset from trace start
+      durMs: number
+      fail?: unknown // Failure defect → failed span
+    }>,
+    hoursAgo: number
+  ) => {
+    const traceId = ((++traceCounter).toString(16).padStart(4, "0") + "9f2c").slice(0, 8).repeat(4)
+    const t0 = Date.now() - hoursAgo * 3600_000
+    spans.forEach((s, i) => {
+      const msg: any = baseMessage({
+        id: pastSnowflake(t0 + s.atMs, (31 + i) % 1024),
+        entityType: s.service,
+        entityId: s.entity,
+        tag: s.op,
+        payload: { op: s.op },
+        processed: true,
+        hoursAgo
+      })
+      msg.trace_id = traceId
+      msg.headers = JSON.stringify({ "x-attempt": "1", spanDurationMs: s.durMs })
+      insertMessage.run(msg)
+      if (s.fail !== undefined) {
+        insertReply.run({
+          id: 5_000_000 + traceCounter * 100 + i,
+          kind: 0,
+          request_id: String(msg.id),
+          payload: JSON.stringify({ _tag: "Failure", defect: s.fail }),
+          sequence: null,
+          acked: 1
+        })
+        mid++
+      }
+    })
+  }
+
+  const CARD_DECLINED = { _tag: "Fail", error: { reason: "card_declined", issuerMessage: "Do not honor" } }
+
+  addTrace(
+    [
+      { service: "ApiGateway", entity: "gw-1", op: "POST /v1/checkout", atMs: 0, durMs: 850 },
+      { service: "CartService", entity: "cart-104", op: "loadCart", atMs: 20, durMs: 110 },
+      { service: "PricingService", entity: "pricing-7", op: "quoteTotals", atMs: 35, durMs: 125 },
+      { service: "PaymentService", entity: "pay-2201", op: "riskCheck", atMs: 190, durMs: 70 },
+      { service: "PaymentService", entity: "pay-2201", op: "authorize", atMs: 180, durMs: 520 },
+      { service: "Ledger", entity: "led-9", op: "appendEntry", atMs: 640, durMs: 60 },
+      { service: "EmailService", entity: "mail-3", op: "sendReceipt", atMs: 660, durMs: 140 }
+    ],
+    0.5
+  )
+  addTrace(
+    [
+      { service: "ApiGateway", entity: "gw-1", op: "POST /v1/checkout", atMs: 0, durMs: 430 },
+      { service: "CartService", entity: "cart-107", op: "loadCart", atMs: 15, durMs: 90 },
+      { service: "PaymentService", entity: "pay-3310", op: "authorize", atMs: 120, durMs: 280, fail: CARD_DECLINED }
+    ],
+    1.5
+  )
+  addTrace(
+    [
+      { service: "AuthService", entity: "auth-1", op: "verifyPassword", atMs: 0, durMs: 140 },
+      { service: "SessionService", entity: "sess_ab12", op: "create", atMs: 150, durMs: 55 }
+    ],
+    0.8
+  )
+  addTrace(
+    [
+      { service: "SearchService", entity: "srch-2", op: "query", atMs: 0, durMs: 340 },
+      { service: "IndexService", entity: "idx-a", op: "fetchShard", atMs: 25, durMs: 275 },
+      { service: "IndexService", entity: "idx-b", op: "fetchShard", atMs: 25, durMs: 255 },
+      { service: "Ranker", entity: "rank-1", op: "rerank", atMs: 310, durMs: 25 }
+    ],
+    2.2
+  )
+  addTrace(
+    [
+      { service: "WebhookDispatcher", entity: "hook-77", op: "deliver", atMs: 0, durMs: 1500 },
+      { service: "WebhookDispatcher", entity: "hook-77", op: "resolveEndpoint", atMs: 0, durMs: 80 }
+    ],
+    3.1
+  )
+  addTrace(
+    [
+      { service: "ImageService", entity: "img-42", op: "upload", atMs: 0, durMs: 620 },
+      { service: "ImageService", entity: "img-42", op: "thumbnail", atMs: 300, durMs: 290 },
+      { service: "CdnPurge", entity: "cdn-5", op: "purgeUrls", atMs: 600, durMs: 45 }
+    ],
+    4.4
+  )
+  addTrace(
+    [
+      { service: "ApiGateway", entity: "gw-2", op: "GET /v1/orders/ord_42", atMs: 0, durMs: 95 },
+      { service: "OrderService", entity: "ord_42", op: "get", atMs: 10, durMs: 70 }
+    ],
+    5.6
+  )
 })
 
 seed()
