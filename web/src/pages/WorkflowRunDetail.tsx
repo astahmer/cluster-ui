@@ -111,6 +111,17 @@ export function WorkflowRunPage({
   }, [run, (data?.activities ?? []) as ActivityRow[], executionId, result])
 
   // DAG: workflow root -> activity steps (same source data as the waterfall)
+  const attemptGroups = React.useMemo(() => {
+    const groups = new Map<string, ActivityRow[]>()
+    for (const activity of activities) {
+      const key = activity.activityName ?? activity.tag ?? activity.kind
+      const current = groups.get(key) ?? []
+      current.push(activity)
+      groups.set(key, current)
+    }
+    return [...groups.entries()].filter(([, entries]) => entries.length > 1)
+  }, [activities])
+
   const flowSpecs = React.useMemo<FlowNodeSpec[]>(() => {
     if (!run) return []
     const activities = [...((data?.activities ?? []) as ActivityRow[])].sort((a, b) => a.createdAt - b.createdAt)
@@ -145,6 +156,31 @@ export function WorkflowRunPage({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   React.useEffect(reload.current, [name, executionId])
 
+
+  const resetActivityFromHere = async (activity: ActivityRow) => {
+    if (
+      !(await confirmDialog({
+        title: `Reset activity "${activity.activityName ?? activity.tag ?? activity.kind}"?`,
+        description: "This clears the selected activity's processed/read markers so the cluster can run it again. It does not rewind other workflow state.",
+        destructive: true,
+        confirmLabel: "Reset activity"
+      }))
+    ) return
+    setBusy(true)
+    try {
+      await api.resetActivity(activity.id)
+      toast.success("Activity reset")
+      triggerRefresh()
+      onChanged?.()
+      setTimeout(() => reload.current(), 250)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      setActionError(msg)
+      toast.error(`reset activity failed: ${msg}`)
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const act = async (kind: "retry" | "interrupt") => {
     if (!run) return
@@ -310,7 +346,7 @@ export function WorkflowRunPage({
 
       <section>
         <h3 className="mb-2 flex items-center justify-between gap-2 text-[11px] font-semibold uppercase tracking-wide text-kumo-subtle">
-          <span>Activity timeline ({data.activities.length})</span>
+          <span>Event history ({(data.eventHistory ?? data.activities).length})</span>
           <span className="flex items-center gap-1">
             <Button
               variant="ghost"
@@ -330,42 +366,63 @@ export function WorkflowRunPage({
             </Button>
           </span>
         </h3>
-        {data.activities.length === 0 ? (
-          <span className="text-kumo-subtle">no activities recorded</span>
+        {(data.eventHistory ?? []).length === 0 && data.activities.length === 0 ? (
+          <span className="text-kumo-subtle">no events recorded</span>
         ) : (
           <ol className="relative space-y-3 border-l border-kumo-line pl-4">
-            {(data.activities as ActivityRow[]).map((a) => (
-              <li key={a.id} className="relative">
-                <span
-                  className={cn(
-                    "absolute -left-[21px] top-1 h-2.5 w-2.5 rounded-full",
-                    a.failed ? "bg-kumo-danger" : a.status === "done" ? "bg-kumo-success" : "bg-kumo-warning"
-                  )}
-                />
-                <div className="flex items-center justify-between gap-2">
-                  <code className="truncate text-[12px]">
-                    {a.activityName ?? a.tag}
-                    {typeof a.attempt === "number" && a.attempt > 1 && (
-                      <Badge tone="warn" className="ml-2">
-                        attempt {a.attempt}
-                      </Badge>
-                    )}
-                  </code>
-                  <Badge tone={a.failed ? "err" : statusTone[a.status]}>
-                    {a.failed ? "failed" : a.status}
-                  </Badge>
-                </div>
-                <div className="mt-0.5 text-[11px] text-kumo-subtle">{fmtTime(a.createdAt)}</div>
-                {a.payload !== null && (
-                  <div className="mt-1">
-                    <JsonBlock value={a.payload} max={140} />
+            {(data.eventHistory ?? data.activities.map((a) => ({
+              id: a.id,
+              timestamp: a.createdAt,
+              event: a.failed ? "activity-failed" : `activity-${a.status}`,
+              activityName: a.activityName,
+              attempt: a.attempt,
+              payload: a.payload
+            }))).map((event) => {
+              const activity = (data.activities as ActivityRow[]).find((a) => a.id === event.id)
+              return (
+                <li key={event.id} className="relative">
+                  <span className={cn("absolute -left-[21px] top-1 h-2.5 w-2.5 rounded-full", event.event.includes("failed") ? "bg-kumo-danger" : event.event.includes("done") ? "bg-kumo-success" : "bg-kumo-warning")} />
+                  <div className="flex items-center justify-between gap-2">
+                    <code className="truncate text-[12px]">{event.activityName ?? event.event}
+                      {typeof event.attempt === "number" && event.attempt > 1 && <Badge tone="warn" className="ml-2">attempt {event.attempt}</Badge>}
+                    </code>
+                    <Badge tone={event.event.includes("failed") ? "err" : event.event.includes("done") ? "ok" : "neutral"}>{event.event}</Badge>
                   </div>
-                )}
-              </li>
-            ))}
+                  <div className="mt-0.5 text-[11px] text-kumo-subtle">{fmtTime(event.timestamp)}</div>
+                  {event.payload !== null && (
+                    <details className="mt-1 rounded border border-kumo-line bg-kumo-recessed px-2 py-1">
+                      <summary className="cursor-pointer text-[11px] text-kumo-subtle">show payload</summary>
+                      <div className="mt-1"><JsonBlock value={event.payload} max={500} /></div>
+                    </details>
+                  )}
+                  {activity && <Button variant="ghost" size="sm" disabled={busy || readonly} title={readonly ? "read-only mode" : "reset only this activity; does not rewind the whole run"} onClick={() => void resetActivityFromHere(activity)}>reset this activity</Button>}
+                </li>
+              )
+            })}
           </ol>
         )}
       </section>
+
+      {attemptGroups.length > 0 && (
+        <section>
+          <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-kumo-subtle">Attempt comparison</h3>
+          <div className="space-y-2">
+            {attemptGroups.map(([name, entries]) => (
+              <details key={name} className="rounded-md border border-kumo-line bg-kumo-base">
+                <summary className="cursor-pointer px-3 py-2 text-[12px] font-medium">{name} · {entries.length} attempts</summary>
+                <div className="grid gap-2 border-t border-kumo-line p-2 md:grid-cols-2">
+                  {entries.map((entry) => (
+                    <div key={entry.id} className="min-w-0">
+                      <div className="mb-1 text-[11px] text-kumo-subtle">attempt {entry.attempt ?? "?"} · {fmtTime(entry.createdAt)}</div>
+                      <JsonBlock value={entry.payload} max={500} />
+                    </div>
+                  ))}
+                </div>
+              </details>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   )
 }

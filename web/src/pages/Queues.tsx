@@ -1,10 +1,10 @@
 import * as React from "react"
 import { QueueIcon } from "@phosphor-icons/react"
-import { api, type QueueInfo } from "../api.ts"
+import { api, type QueueInfo, type QueueJob, type QueueJobState } from "../api.ts"
 import { Badge, Table, TBody, TD, TH, THead, TR } from "../components/ui.tsx"
 import { ErrorNote, PageHeader, useLive } from "../shell.tsx"
 import { Empty, Tooltip, Dialog, DialogTitle, DialogDescription } from "../kumo"
-import { SkeletonTable } from "../components/pieces.tsx"
+import { JsonBlock, SkeletonTable } from "../components/pieces.tsx"
 import { Button, Input, Select } from "../components/ui.tsx"
 import { toast } from "../toast.tsx"
 import { confirmDialog } from "../components/dialogs.tsx"
@@ -20,6 +20,7 @@ export function QueuesPage() {
   const { loading, error, refresh } = useLive(async () => setQueues(await api.queues()))
   const [addFor, setAddFor] = React.useState<string | null>(null)
   const [cleanFor, setCleanFor] = React.useState<QueueInfo | null>(null)
+  const [browseQueue, setBrowseQueue] = React.useState<string | null>(null)
   const config = useAppConfig()
   const readonly = config?.readonly === true
 
@@ -99,6 +100,13 @@ export function QueuesPage() {
                 <TD className="text-right">
                   <div className="flex justify-end gap-1.5">
                     <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setBrowseQueue(q.name)}
+                    >
+                      Browse jobs
+                    </Button>
+                    <Button
                       variant="ghost"
                       size="sm"
                       disabled={readonly}
@@ -140,6 +148,14 @@ export function QueuesPage() {
         )}
       </div>
 
+      {browseQueue !== null && (
+        <QueueJobsPanel
+          queue={browseQueue}
+          readonly={readonly}
+          onClose={() => setBrowseQueue(null)}
+        />
+      )}
+
       {queues.length === 0 && (
         <p className="mt-2 flex items-center gap-1 text-[12px] text-kumo-subtle">
           redis clusters expose queue pause/resume here; sqlite clusters manage delivery through the
@@ -173,6 +189,146 @@ export function QueuesPage() {
         />
       )}
     </div>
+  )
+}
+
+const JOB_STATES: ReadonlyArray<{ value: QueueJobState; label: string }> = [
+  { value: "wait", label: "waiting" },
+  { value: "active", label: "active" },
+  { value: "delayed", label: "delayed" },
+  { value: "completed", label: "completed" },
+  { value: "failed", label: "failed" }
+]
+
+function QueueJobsPanel({
+  queue,
+  readonly,
+  onClose
+}: {
+  queue: string
+  readonly: boolean
+  onClose: () => void
+}) {
+  const [state, setState] = React.useState<QueueJobState>("wait")
+  const [page, setPage] = React.useState(0)
+  const [jobs, setJobs] = React.useState<QueueJob[]>([])
+  const [total, setTotal] = React.useState(0)
+  const [selected, setSelected] = React.useState<QueueJob | null>(null)
+  const [detail, setDetail] = React.useState<QueueJob | null>(null)
+  const [busyId, setBusyId] = React.useState<string | null>(null)
+  const limit = 25
+  const { loading, error, refresh } = useLive(
+    async () => {
+      const result = await api.queueJobs(queue, state, { limit, offset: page * limit })
+      setJobs(result.rows)
+      setTotal(result.total)
+    },
+    [queue, state, page]
+  )
+  const pages = Math.max(1, Math.ceil(total / limit))
+
+  const inspect = async (job: QueueJob) => {
+    setSelected(job)
+    try {
+      setDetail(await api.queueJob(job.id))
+    } catch {
+      setDetail(job)
+    }
+  }
+
+  const promote = async (job: QueueJob) => {
+    setBusyId(job.id)
+    try {
+      await api.promoteJob(job.id)
+      toast.success(`Promoted ${job.jobId}`)
+      refresh()
+    } catch (e) {
+      toast.error(`Promote failed: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  return (
+    <section className="mt-4 rounded-lg border border-kumo-line bg-kumo-base">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-kumo-line px-3 py-2">
+        <div>
+          <h2 className="text-sm font-semibold">{queue} jobs</h2>
+          <p className="text-[11px] text-kumo-subtle">individual BullMQ jobs · newest first where supported</p>
+        </div>
+        <Button variant="ghost" size="sm" onClick={onClose}>close</Button>
+      </div>
+      <div className="flex flex-wrap items-center gap-1 border-b border-kumo-line px-3 py-2">
+        {JOB_STATES.map((entry) => (
+          <Button
+            key={entry.value}
+            variant={state === entry.value ? "secondary" : "ghost"}
+            size="sm"
+            onClick={() => {
+              setState(entry.value)
+              setPage(0)
+            }}
+          >
+            {entry.label}
+          </Button>
+        ))}
+        <span className="ml-auto text-[11px] tabular-nums text-kumo-subtle">{total} total</span>
+      </div>
+      {error && <ErrorNote error={error} onRetry={refresh} />}
+      {loading && jobs.length === 0 ? (
+        <div className="p-4 text-[12px] text-kumo-subtle">loading jobs…</div>
+      ) : jobs.length === 0 ? (
+        <div className="p-4 text-[12px] text-kumo-subtle">no {state} jobs in this queue</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <Table>
+            <THead><TR><TH>Job</TH><TH>Name</TH><TH>Status</TH><TH className="text-right">Attempts</TH><TH className="text-right">Actions</TH></TR></THead>
+            <TBody>
+              {jobs.map((job) => (
+                <TR key={job.id}>
+                  <TD><button type="button" className="cursor-pointer font-mono text-[12px] text-kumo-link hover:underline" onClick={() => void inspect(job)}>{job.jobId}</button></TD>
+                  <TD className="font-medium">{job.name}</TD>
+                  <TD><Badge tone={job.state === "failed" ? "err" : job.state === "completed" ? "ok" : job.state === "active" ? "info" : "neutral"}>{job.state}</Badge></TD>
+                  <TD className="text-right tabular-nums">{job.attemptsMade}</TD>
+                  <TD className="text-right"><span className="flex justify-end gap-1">
+                    <Button variant="ghost" size="sm" onClick={() => void inspect(job)}>inspect</Button>
+                    {job.state === "delayed" && <Button variant="secondary" size="sm" disabled={readonly || busyId === job.id} onClick={() => void promote(job)}>{busyId === job.id ? "promoting…" : "promote"}</Button>}
+                  </span></TD>
+                </TR>
+              ))}
+            </TBody>
+          </Table>
+        </div>
+      )}
+      <div className="flex items-center justify-between border-t border-kumo-line px-3 py-2 text-[12px]">
+        <Button variant="ghost" size="sm" disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>previous</Button>
+        <span className="tabular-nums text-kumo-subtle">page {page + 1} / {pages}</span>
+        <Button variant="ghost" size="sm" disabled={page + 1 >= pages} onClick={() => setPage((p) => p + 1)}>next</Button>
+      </div>
+      {selected && detail && (
+        <Dialog.Root open onOpenChange={(open: boolean) => !open && (setSelected(null), setDetail(null))}>
+          <Dialog className="max-h-[85vh] overflow-y-auto p-6">
+            <DialogTitle>Job {detail.jobId}</DialogTitle>
+            <DialogDescription>{detail.queue} · {detail.name} · {detail.state}</DialogDescription>
+            <div className="mt-4 grid grid-cols-2 gap-2 text-[12px]">
+              <span>attempts <strong>{detail.attemptsMade}</strong></span>
+              <span>created <strong>{detail.timestamp ? new Date(detail.timestamp).toLocaleString() : "—"}</strong></span>
+              <span>processed <strong>{detail.processedOn ? new Date(detail.processedOn).toLocaleString() : "—"}</strong></span>
+              <span>finished <strong>{detail.finishedOn ? new Date(detail.finishedOn).toLocaleString() : "—"}</strong></span>
+            </div>
+            {detail.failedReason && <p className="mt-3 rounded border border-kumo-danger/30 bg-kumo-danger-tint p-2 text-[12px] text-kumo-danger">{detail.failedReason}</p>}
+            <h3 className="mt-4 mb-1 text-[11px] font-semibold uppercase tracking-wide text-kumo-subtle">Input</h3>
+            <JsonBlock value={detail.data} />
+            {detail.returnValue !== null && <><h3 className="mt-4 mb-1 text-[11px] font-semibold uppercase tracking-wide text-kumo-subtle">Return value</h3><JsonBlock value={detail.returnValue} /></>}
+            {detail.stacktrace.length > 0 && <><h3 className="mt-4 mb-1 text-[11px] font-semibold uppercase tracking-wide text-kumo-subtle">Stack trace</h3><pre className="max-h-48 overflow-auto rounded bg-kumo-recessed p-2 text-[11px]">{detail.stacktrace.join("\\n")}</pre></>}
+            <div className="mt-5 flex justify-end gap-2">
+              {detail.state === "delayed" && <Button variant="secondary" disabled={readonly} onClick={() => { void promote(detail); setSelected(null); setDetail(null) }}>promote now</Button>}
+              <Dialog.Close render={(p) => <Button variant="secondary" {...(p as object)}>close</Button>} />
+            </div>
+          </Dialog>
+        </Dialog.Root>
+      )}
+    </section>
   )
 }
 

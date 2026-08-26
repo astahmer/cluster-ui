@@ -34,6 +34,7 @@ interface RawJob {
   data: unknown
   returnValue: unknown
   failedReason: string | null
+  stacktrace: string[]
   attemptsMade: number
   timestamp: number | null
   processedOn: number | null
@@ -108,6 +109,14 @@ export function makeRedisRepo(url: string): import("./queries.ts").Repo {
       data,
       returnValue,
       failedReason: raw.failedReason || null,
+      stacktrace: (() => {
+        try {
+          const parsed = JSON.parse(raw.stacktrace ?? "[]")
+          return Array.isArray(parsed) ? parsed.map(String) : []
+        } catch {
+          return raw.stacktrace ? [raw.stacktrace] : []
+        }
+      })(),
       attemptsMade: Number(raw.attemptsMade ?? 0),
       timestamp: raw.timestamp ? Number(raw.timestamp) : null,
       processedOn: raw.processedOn ? Number(raw.processedOn) : null,
@@ -148,6 +157,22 @@ export function makeRedisRepo(url: string): import("./queries.ts").Repo {
         return "pending"
     }
   }
+
+  const toJobView = (j: RawJob) => ({
+    id: `${j.queue}:${j.jobId}`,
+    queue: j.queue,
+    jobId: j.jobId,
+    name: j.name,
+    state: j.state,
+    data: j.data,
+    returnValue: j.returnValue,
+    failedReason: j.failedReason,
+    stacktrace: j.stacktrace,
+    attemptsMade: j.attemptsMade,
+    timestamp: j.timestamp,
+    processedOn: j.processedOn,
+    finishedOn: j.finishedOn
+  })
 
   const toMessageView = (j: RawJob) => ({
     id: `${j.queue}:${j.jobId}`,
@@ -267,6 +292,38 @@ export function makeRedisRepo(url: string): import("./queries.ts").Repo {
     })
 
   const allSync = <T,>(value: T): Promise<T> => Promise.resolve(value)
+
+  /** List BullMQ jobs for one queue, preserving the dashboard's bounded paging contract. */
+  const queueJobs = async (
+    queue: string,
+    state: JobState,
+    limit = 25,
+    offset = 0
+  ) => {
+    const safeLimit = Math.min(Math.max(Math.floor(limit) || 25, 1), 100)
+    const safeOffset = Math.max(Math.floor(offset) || 0, 0)
+    await ready()
+    const ids = await jobIds(queue, state, safeOffset + safeLimit)
+    const jobs: RawJob[] = []
+    for (const id of ids.slice(safeOffset, safeOffset + safeLimit)) {
+      const job = await fetchJob(queue, id, state)
+      if (job) jobs.push(job)
+    }
+    const count = state === "completed" || state === "failed" || state === "delayed" ?
+      await withTimeout(redis.zcard(`bull:${queue}:${state}`)) :
+      await withTimeout(redis.llen(`bull:${queue}:${state === "wait" ? "wait" : state}`))
+    return { queue, state, rows: jobs.map(toJobView), total: count, limit: safeLimit, offset: safeOffset }
+  }
+
+  const jobDetail = async (id: string): Promise<ReturnType<typeof toJobView> | null> => {
+    const [queue, jobId] = splitId(id)
+    await ready()
+    for (const state of STATES) {
+      const job = await fetchJob(queue, jobId, state)
+      if (job) return toJobView(job)
+    }
+    return null
+  }
 
   const actions = {
     async retry(id: string) {
@@ -458,6 +515,14 @@ export function makeRedisRepo(url: string): import("./queries.ts").Repo {
         data: safeParse(raw.data),
         returnValue: safeParse(raw.returnvalue),
         failedReason: raw.failedReason || null,
+        stacktrace: (() => {
+          try {
+            const parsed = JSON.parse(raw.stacktrace ?? "[]")
+            return Array.isArray(parsed) ? parsed.map(String) : []
+          } catch {
+            return raw.stacktrace ? [raw.stacktrace] : []
+          }
+        })(),
         attemptsMade: Number(raw.attemptsMade ?? 0),
         timestamp: raw.timestamp ? Number(raw.timestamp) : null,
         processedOn: raw.processedOn ? Number(raw.processedOn) : null,
@@ -510,6 +575,8 @@ export function makeRedisRepo(url: string): import("./queries.ts").Repo {
       allSync({ rows: [] as TraceSummary[], total: 0 }),
     trace: (_traceId: string) => allSync([]),
     queues: () => queues(),
+    queueJobs: (queue: string, state: JobState, limit?: number, offset?: number) => queueJobs(queue, state, limit, offset),
+    jobDetail: (id: string) => jobDetail(id),
     jobTree: (id: string) => jobTree(id),
     actions
   }
@@ -536,6 +603,29 @@ export interface RedisRepoExtras {
     addJob: (queue: string, name: string, data: unknown) => Promise<{ ok: true; id: string }>
   }
   queues: () => Promise<Array<{ name: string; paused: boolean }>>
+  queueJobs: (queue: string, state: "wait" | "active" | "delayed" | "completed" | "failed", limit?: number, offset?: number) => Promise<{
+    queue: string
+    state: string
+    rows: Array<{
+      id: string
+      queue: string
+      jobId: string
+      name: string
+      state: string
+      data: unknown
+      returnValue: unknown
+      failedReason: string | null
+      stacktrace: string[]
+      attemptsMade: number
+      timestamp: number | null
+      processedOn: number | null
+      finishedOn: number | null
+    }>
+    total: number
+    limit: number
+    offset: number
+  }>
+  jobDetail: (id: string) => Promise<object | null>
   jobTree: (id: string) => Promise<object | null>
 }
 

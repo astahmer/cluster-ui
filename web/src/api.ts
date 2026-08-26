@@ -112,8 +112,19 @@ export interface WorkflowRunDetail {
     tag: string | null
     kind: string
     status: MessageStatus
+    failed?: boolean
+    activityName?: string
+    attempt?: number
     payload: unknown
     createdAt: number
+  }[]
+  eventHistory?: {
+    id: string
+    timestamp: number
+    event: string
+    activityName?: string
+    attempt?: number
+    payload: unknown
   }[]
 }
 
@@ -325,6 +336,33 @@ export interface QueueInfo {
   counts?: { waiting: number; active: number; delayed: number; completed: number; failed: number }
 }
 
+export type QueueJobState = "wait" | "active" | "delayed" | "completed" | "failed"
+
+export interface QueueJob {
+  id: string
+  queue: string
+  jobId: string
+  name: string
+  state: QueueJobState
+  data: unknown
+  returnValue: unknown
+  failedReason: string | null
+  stacktrace: string[]
+  attemptsMade: number
+  timestamp: number | null
+  processedOn: number | null
+  finishedOn: number | null
+}
+
+export interface QueueJobList {
+  queue: string
+  state: QueueJobState
+  rows: QueueJob[]
+  total: number
+  limit: number
+  offset: number
+}
+
 export interface TraceSummary {
   traceId: string
   count: number
@@ -423,6 +461,18 @@ export const api = {
     ),
   queues: (q?: { cluster?: string }) =>
     get<QueueInfo[]>("/api/queues" + (q?.cluster ? `?cluster=${encodeURIComponent(q.cluster)}` : "")),
+  queueJobs: (queue: string, state: QueueJobState, q?: { limit?: number; offset?: number; cluster?: string }) =>
+    get<QueueJobList>(
+      `/api/queues/${encodeURIComponent(queue)}/jobs?${new URLSearchParams(
+        Object.entries({ state, limit: q?.limit, offset: q?.offset, cluster: q?.cluster })
+          .filter(([, v]) => v !== undefined && v !== "")
+          .map(([k, v]) => [k, String(v)])
+      )}`
+    ),
+  queueJob: (id: string, cluster?: string) =>
+    get<QueueJob>(`/api/queue-jobs/${encodeURIComponent(id)}${cluster ? `?cluster=${encodeURIComponent(cluster)}` : ""}`),
+  promoteJob: (id: string, cluster?: string) =>
+    post<{ ok: true }>("/api/actions/promote", { id, ...(cluster ? { cluster } : {}) }),
   pauseQueue: (queue: string, cluster?: string) =>
     post<{ ok: true }>("/api/actions/pause-queue", { queue, ...(cluster ? { cluster } : {}) }),
   resumeQueue: (queue: string, cluster?: string) =>
@@ -470,8 +520,6 @@ export const api = {
   interruptMessage: (messageId: string) => post<{ ok: true }>("/api/actions/interrupt", { messageId }),
   resetActivity: (messageId: string) =>
     post<{ ok: true }>("/api/actions/reset-activity", { messageId }),
-  /** Promote a delayed job so it becomes pending immediately (redis clusters only). */
-  promoteJob: (id: string) => post<{ ok: true }>("/api/actions/promote", { id }),
   deleteMessage: (messageId: string) => post<{ ok: true }>("/api/actions/delete", { messageId }),
 
   /** Apply an action to many messages at once; per-id results, batch never hard-fails. */

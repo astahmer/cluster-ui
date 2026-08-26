@@ -571,6 +571,20 @@ export function makeRepo(db: Database.Database, prefix: string = config.prefix) 
           createdAt
         }
       })
+    const eventHistory = rows.map((r) => {
+      const { createdAt } = decodeSnowflake(String(r.id))
+      const payload = safeJson(r.payload)
+      const isRun = r.tag === "run"
+      const activity = activities.find((a) => a.id === String(r.id))
+      return {
+        id: String(r.id),
+        timestamp: createdAt,
+        event: isRun ? "run-created" : activity?.failed ? "activity-failed" : `activity-${activity?.status ?? "pending"}`,
+        activityName: activity?.activityName,
+        attempt: activity?.attempt,
+        payload
+      }
+    })
     const run = runRow ?
       (() => {
         const view = toMessageView({ ...runRow, entity_type: `Workflow/${name}`, entity_id: executionId })
@@ -588,7 +602,7 @@ export function makeRepo(db: Database.Database, prefix: string = config.prefix) 
         }
       })() :
       null
-    return { run, activities }
+    return { run, activities, eventHistory }
   }
 
   /** Recent traces: non-null trace_ids grouped, newest first. Optional id-substring search + offset paging (UX P1-15). */

@@ -554,6 +554,41 @@ const redisRouter = HttpRouter.empty.pipe(
     )
   ),
   HttpRouter.get(
+    "/api/queues/:name/jobs",
+    Effect.flatMap(req, (p) => {
+      const repo = repoFor(p.cluster)
+      if (!repo) return Effect.succeed(notFound("cluster"))
+      if (repo.db !== null || !(repo as unknown as RedisRepoExtras).queueJobs) {
+        return Effect.succeed(
+          HttpServerResponse.unsafeJson({ error: "queue jobs are only supported for redis clusters" }, { status: 400 })
+        )
+      }
+      const state = p.state
+      if (state !== "wait" && state !== "active" && state !== "delayed" && state !== "completed" && state !== "failed") {
+        return Effect.succeed(HttpServerResponse.unsafeJson({ error: "state must be wait | active | delayed | completed | failed" }, { status: 400 }))
+      }
+      const limit = intParam(p.limit)
+      const offset = intParam(p.offset)
+      return Effect.tryPromise(async () => json(await (repo as unknown as RedisRepoExtras).queueJobs(decodeURIComponent(p.name!), state, limit, offset)))
+    })
+  ),
+  HttpRouter.get(
+    "/api/queue-jobs/:id",
+    Effect.flatMap(req, (p) => {
+      const repo = repoFor(p.cluster)
+      if (!repo) return Effect.succeed(notFound("cluster"))
+      if (repo.db !== null || !(repo as unknown as RedisRepoExtras).jobDetail) {
+        return Effect.succeed(
+          HttpServerResponse.unsafeJson({ error: "queue jobs are only supported for redis clusters" }, { status: 400 })
+        )
+      }
+      return Effect.tryPromise(async () => {
+        const job = await (repo as unknown as RedisRepoExtras).jobDetail(decodeURIComponent(p.id!))
+        return job ? json(job) : notFound("job")
+      })
+    })
+  ),
+  HttpRouter.get(
     "/api/job-tree/:id",
     Effect.flatMap(req, (p) => {
       const repo = repoFor(p.cluster)

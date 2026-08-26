@@ -115,7 +115,7 @@ async function runChecks() {
     await check(
       "workflow run detail",
       `/api/workflows/${encodeURIComponent(wf.name)}/${encodeURIComponent(run.executionId)}`,
-      (b) => b.run !== null && Array.isArray(b.activities)
+      (b) => b.run !== null && Array.isArray(b.activities) && Array.isArray(b.eventHistory)
     )
   }
 
@@ -443,6 +443,16 @@ async function runChecks() {
 
         const queuesBody = await rc("redis queues listing", "/api/queues?cluster=local-redis",
           (b) => Array.isArray(b) && b.some((q: any) => q.name === "webhooks" && q.paused === true))
+
+        const queueJobs = await rc("redis queue jobs browser", "/api/queues/emails/jobs?cluster=local-redis&state=completed&limit=2&offset=0",
+          (b) => b.queue === "emails" && b.state === "completed" && Array.isArray(b.rows) && b.rows.length <= 2 && typeof b.total === "number" && b.rows[0]?.data !== undefined)
+        if (queueJobs?.rows?.[0]?.id) {
+          const jobDetailRes = await fetch(`http://127.0.0.1:${R_PORT}/api/queue-jobs/${encodeURIComponent(queueJobs.rows[0].id)}?cluster=local-redis`)
+          const jobDetail = await jobDetailRes.json().catch(() => null)
+          const jobDetailOk = jobDetailRes.status === 200 && jobDetail.id === queueJobs.rows[0].id && "attemptsMade" in jobDetail
+          console.log(`${jobDetailOk ? "✓" : "✗"} redis queue job detail`)
+          if (!jobDetailOk) failures++
+        }
 
         // pause/resume round trip on a non-paused queue
         await fetch(`http://127.0.0.1:${R_PORT}/api/actions/pause-queue`, {
