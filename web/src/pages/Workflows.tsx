@@ -1,4 +1,5 @@
 import * as React from "react"
+import { X } from "@phosphor-icons/react"
 import { api, type MessageStatus, type Workflow, type WorkflowRun } from "../api.ts"
 import { ActivityDot, FilterChip, SkeletonTable, SortableTh, STICKY_TH, useDialogA11y, useHashParam, rowInteractions, useSort } from "../components/pieces.tsx"
 import { relTime } from "../format.ts"
@@ -36,7 +37,6 @@ export function WorkflowListPage() {
 
   if (loading && rows.length === 0) return <SkeletonTable rows={6} cols={4} />
   const totalRuns = rows.reduce((acc, w) => acc + w.runs, 0)
-  const totalFailed = rows.reduce((acc, w) => acc + (w.failedRuns ?? 0), 0)
   const sortedRows =
     sortBy === "name" ?
       [...rows].sort((a, b) => a.name.localeCompare(b.name)) :
@@ -61,8 +61,8 @@ export function WorkflowListPage() {
           <FilterChip label={`sort: ${sortBy === "runs" ? "most runs" : "most failed"}`} onRemove={() => setSortByParam("")} />
         </div>
       )}
-      <FilterBar defs={facetDefs} rows={rows} facets={facets} />
       <ErrorNote error={error} onRetry={refresh} />
+      <FilterBar defs={facetDefs} rows={rows} facets={facets} />
       {rows.length === 0 ? (
         <Card>
           <CardContent className="py-8">
@@ -77,8 +77,10 @@ export function WorkflowListPage() {
           {sortedRows.map((w) => (
             <Card key={w.name} className="transition-colors hover:border-kumo-brand/60">
               <a href={`#/workflows/${encodeURIComponent(w.name)}`} className="block">
-                <div className="flex items-center justify-between px-4 pt-3">
-                  <span className="font-semibold">{w.name}</span>
+                <div className="flex items-center justify-between gap-2 px-4 pt-3">
+                  <span className="min-w-0 truncate font-semibold" title={w.name}>
+                    {w.name}
+                  </span>
                   <ActivityDot at={w.lastActivityAt} />
                 </div>
                 <div className="flex items-center gap-2 px-4 py-3 text-[13px]">
@@ -87,11 +89,8 @@ export function WorkflowListPage() {
                   {(w.failedRuns ?? 0) > 0 && (
                     <Badge tone="err">{w.failedRuns} failed</Badge>
                   )}
-                  <span className="ml-auto text-kumo-subtle tabular-nums">
-                    {w.runs} runs
-                    {totalFailed > 0 && (w.failedRuns ?? 0) > 0 ?
-                      ` · ${Math.round(((w.failedRuns ?? 0) / w.runs) * 100)}% fail rate` :
-                      ""}
+                  <span className="ml-auto shrink-0 text-kumo-subtle tabular-nums">
+                    {w.runs} runs · {w.runs > 0 ? Math.round(((w.failedRuns ?? 0) / w.runs) * 100) : 0}% fail rate
                   </span>
                 </div>
               </a>
@@ -287,10 +286,10 @@ function WorkflowRunDetailModal({
             {name} <span className="font-mono text-xs text-kumo-subtle">/ {executionId}</span>
           </h2>
           <button
-            className="cursor-pointer rounded px-2 py-1 text-[12px] text-kumo-subtle hover:bg-kumo-tint hover:text-kumo-default"
+            className="flex cursor-pointer items-center gap-1 rounded px-2 py-1 text-[12px] text-kumo-subtle hover:bg-kumo-tint hover:text-kumo-default"
             onClick={onClose}
           >
-            ✕ close
+            <X className="h-3.5 w-3.5" /> close
           </button>
         </div>
         <WorkflowRunPage name={name} executionId={executionId} onChanged={onChanged} />

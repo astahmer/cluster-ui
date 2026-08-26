@@ -2,7 +2,7 @@ import * as React from "react"
 import { api, mcpRpc } from "../api.ts"
 import { Badge, Button, Input, Select } from "../components/ui.tsx"
 import { JsonBlock } from "../components/pieces.tsx"
-import { ErrorNote, PageHeader, useLive } from "../shell.tsx"
+import { ErrorNote, PageHeader } from "../shell.tsx"
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui.tsx"
 import { ClipboardText, CodeBlock, Empty } from "../kumo"
 
@@ -49,7 +49,12 @@ export function McpPage() {
     }
   }, [])
 
-  useLive(refresh)
+  // fetch once on mount + manual refresh — the tool registry essentially never
+  // changes, and the SSE bus would otherwise re-run the initialize handshake
+  // every ~5s (UX audit #2)
+  React.useEffect(() => {
+    refresh()
+  }, [refresh])
 
   const endpoint = `${window.location.origin}/mcp`
   const configSnippet = JSON.stringify(
@@ -64,7 +69,13 @@ export function McpPage() {
         title="MCP"
         subtitle="Model Context Protocol — let any MCP client query and act on the cluster"
       />
-      <ErrorNote error={error} />
+      <ErrorNote error={error} onRetry={refresh} />
+      <p className="flex items-center gap-1 text-[12px] text-kumo-subtle">
+        tool registry is fetched on load
+        <Button variant="ghost" size="sm" onClick={() => void refresh()}>
+          refresh
+        </Button>
+      </p>
 
       {/* connection */}
       <Card>

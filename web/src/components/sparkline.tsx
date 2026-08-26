@@ -30,6 +30,9 @@ const VIEW_W = 300
 const VIEW_H = 100
 /** headroom so the line never clips against the frame */
 const PAD_Y = 8
+/** hover labels switch to day-aware formatting past a full day of samples
+ * ("14:32" is ambiguous across seven days — UX audit #2) */
+const DAY_MS = 24 * 60 * 60 * 1000
 
 export function Sparkline({
   points,
@@ -85,6 +88,16 @@ export function Sparkline({
       `${linePath} L${VIEW_W},${VIEW_H} L0,${VIEW_H} Z`
 
   const last = points[points.length - 1]
+
+  const visibleSpanMs = points.length >= 2 ? last.t - points[0].t : 0
+  const formatHoverTime = (t: number) => {
+    const d = new Date(t)
+    return (
+      visibleSpanMs > DAY_MS ?
+        d.toLocaleString(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit" }) :
+        d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
+    )
+  }
 
   const onPointerMove = (e: React.PointerEvent) => {
     if (points.length < 2) return
@@ -167,9 +180,7 @@ export function Sparkline({
           style={{ left: `${values.length > 1 ? (hoverIdx! / (values.length - 1)) * 100 : 50}%` }}
         >
           {formatValue(hovered.v)}
-          <span className="ml-1 text-kumo-subtle">
-            {new Date(hovered.t).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
-          </span>
+          <span className="ml-1 text-kumo-subtle">{formatHoverTime(hovered.t)}</span>
         </span>
       )}
     </div>

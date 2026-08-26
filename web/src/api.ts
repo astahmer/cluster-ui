@@ -157,6 +157,8 @@ export interface AppConfig {
   clusters: string[]
   clusterKinds?: { name: string; kind: "sqlite" | "redis" }[]
   tracingUrlTemplate: string | null
+  /** true when the server runs with CLUSTER_UI_READONLY — every write action 403s */
+  readonly?: boolean
 }
 
 export interface JobTreeNode {
@@ -375,9 +377,15 @@ export interface RunnerFibersReport {
 }
 
 export const api = {
-  runnerLogs: (cluster?: string) =>
+  runnerLogs: (cluster?: string, opts?: { since?: number }) =>
     get<{ runners: RunnerLogsReport[] }>(
-      "/api/logs" + (cluster ? `?cluster=${encodeURIComponent(cluster)}` : "")
+      "/api/logs?" +
+        [
+          cluster ? `cluster=${encodeURIComponent(cluster)}` : "",
+          opts?.since !== undefined ? `since=${opts.since}` : ""
+        ]
+          .filter(Boolean)
+          .join("&")
     ),
   runnerFibers: (cluster?: string) =>
     get<{ runners: RunnerFibersReport[] }>(
@@ -462,6 +470,8 @@ export const api = {
   interruptMessage: (messageId: string) => post<{ ok: true }>("/api/actions/interrupt", { messageId }),
   resetActivity: (messageId: string) =>
     post<{ ok: true }>("/api/actions/reset-activity", { messageId }),
+  /** Promote a delayed job so it becomes pending immediately (redis clusters only). */
+  promoteJob: (id: string) => post<{ ok: true }>("/api/actions/promote", { id }),
   deleteMessage: (messageId: string) => post<{ ok: true }>("/api/actions/delete", { messageId }),
 
   /** Apply an action to many messages at once; per-id results, batch never hard-fails. */

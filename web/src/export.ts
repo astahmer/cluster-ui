@@ -28,3 +28,14 @@ export function downloadCsv(rows: ReadonlyArray<Record<string, unknown>>, filena
   const lines = [headers, ...rows.map((row) => headers.map((h) => csvField(row[h])))]
   triggerDownload(new Blob([lines.map((line) => line.join(",")).join("\n")], { type: "text/csv" }), filename)
 }
+
+/**
+ * Shared export affordance (UX-AUDIT-2): bind the current page's rows to a
+ * filename base once, get json/csv download callbacks for header buttons.
+ * Label convention matches Messages: "export page (json)" / "export page (csv)".
+ */
+export function useExport<T extends Record<string, unknown>>(rows: T[], baseName: string) {
+  const json = () => downloadJson(rows, `${baseName}.json`)
+  const csv = () => downloadCsv(rows, `${baseName}.csv`)
+  return { json, csv }
+}

@@ -5,9 +5,10 @@ import { Badge, Table, TBody, TD, TH, THead, TR } from "../components/ui.tsx"
 import { ErrorNote, PageHeader, useLive } from "../shell.tsx"
 import { Empty, Tooltip, Dialog, DialogTitle, DialogDescription } from "../kumo"
 import { SkeletonTable } from "../components/pieces.tsx"
-import { Button, Input } from "../components/ui.tsx"
+import { Button, Input, Select } from "../components/ui.tsx"
 import { toast } from "../toast.tsx"
 import { confirmDialog } from "../components/dialogs.tsx"
+import { useAppConfig } from "../config.ts"
 
 /**
  * Queue controls (redis/BullMQ clusters): pause/resume intake per queue,
@@ -19,6 +20,8 @@ export function QueuesPage() {
   const { loading, error, refresh } = useLive(async () => setQueues(await api.queues()))
   const [addFor, setAddFor] = React.useState<string | null>(null)
   const [cleanFor, setCleanFor] = React.useState<QueueInfo | null>(null)
+  const config = useAppConfig()
+  const readonly = config?.readonly === true
 
   if (loading && queues.length === 0) return <SkeletonTable />
 
@@ -95,13 +98,31 @@ export function QueuesPage() {
                 </TD>
                 <TD className="text-right">
                   <div className="flex justify-end gap-1.5">
-                    <Button variant="ghost" size="sm" onClick={() => setAddFor(q.name)}>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={readonly}
+                      title={readonly ? "read-only mode" : undefined}
+                      onClick={() => setAddFor(q.name)}
+                    >
                       Add job
                     </Button>
-                    <Button variant="ghost" size="sm" onClick={() => setCleanFor(q)}>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={readonly}
+                      title={readonly ? "read-only mode" : undefined}
+                      onClick={() => setCleanFor(q)}
+                    >
                       Clean…
                     </Button>
-                    <Button variant={q.paused ? "secondary" : "ghost"} size="sm" onClick={() => void toggle(q)}>
+                    <Button
+                      variant={q.paused ? "secondary" : "ghost"}
+                      size="sm"
+                      disabled={readonly}
+                      title={readonly ? "read-only mode" : undefined}
+                      onClick={() => void toggle(q)}
+                    >
                       {q.paused ? "Resume" : "Pause"}
                     </Button>
                   </div>
@@ -166,7 +187,7 @@ function AddJobDialog({
   onDone: (id: string) => void
 }) {
   const [name, setName] = React.useState("manual")
-  const [dataText, setDataText] = React.useState("{\n  \n}")
+  const [dataText, setDataText] = React.useState("{}")
   const [busy, setBusy] = React.useState(false)
   const [err, setErr] = React.useState<string | null>(null)
 
@@ -253,6 +274,20 @@ function CleanDialog({
     }
   }
 
+  const confirmAndSubmit = async () => {
+    const scopeLabel =
+      scope === "*" ? "completed AND failed" : scope
+    const ok = await confirmDialog({
+      title: `Remove ${scopeLabel} jobs from "${queue.name}"?`,
+      description: `Up to ${count.trim() !== "" ? count : 500} jobs, oldest first${
+        olderMin.trim() !== "" ? ` (older than ${olderMin}m)` : ""
+      }. Currently ${completedCount} completed · ${failedCount} failed. This cannot be undone.`,
+      destructive: true,
+      confirmLabel: "Remove jobs"
+    })
+    if (ok) void submit()
+  }
+
   return (
     <Dialog.Root open onOpenChange={(next: boolean) => !next && onClose()}>
       <Dialog className="p-6">
@@ -261,16 +296,15 @@ function CleanDialog({
           Removes finished jobs oldest-first ({completedCount} completed · {failedCount} failed right now).
         </DialogDescription>
         <div className="mt-4 space-y-3">
-          <select
+          <Select
             aria-label="which jobs to remove"
-            className="w-full cursor-pointer rounded-md border border-kumo-line bg-kumo-canvas px-2 py-1.5 text-[13px]"
             value={scope}
             onChange={(e) => setScope(e.target.value as typeof scope)}
           >
             <option value="completed">completed only</option>
             <option value="failed">failed only</option>
             <option value="*">both completed and failed</option>
-          </select>
+          </Select>
           <div className="flex gap-2">
             <Input
               aria-label="older than minutes"
@@ -297,7 +331,7 @@ function CleanDialog({
               Cancel
             </Button>
           )} />
-          <Button variant="danger" disabled={busy} onClick={() => void submit()}>
+          <Button variant="danger" disabled={busy} onClick={() => void confirmAndSubmit()}>
             {busy ? "Cleaning…" : "Remove jobs"}
           </Button>
         </div>

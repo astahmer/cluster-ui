@@ -7,7 +7,8 @@ import {
   type MessageStatus,
   type RunResult
 } from "../api.ts"
-import { FunnelSimple, Trash, XCircle } from "@phosphor-icons/react"
+import { ArrowClockwise, ArrowCounterClockwise, ArrowUpRight, Copy, FunnelSimple, Trash, XCircle } from "@phosphor-icons/react"
+import { useAppConfig } from "../config.ts"
 import { downloadCsv, downloadJson } from "../export.ts"
 import { DetailPanel, SkeletonTable, StatusBadge, statusTone, rowInteractions, useMessageDetail, Pager } from "../components/pieces.tsx"
 import { FilterBar, useFacets, type FacetDef } from "../components/filters/index.tsx"
@@ -22,23 +23,6 @@ import { triggerRefresh, useLive, usePauseWhile } from "../live.ts"
 import { Banner, CodeBlock, Empty, InputGroup, Tabs, Toolbar } from "../kumo"
 
 /* ------------------------------------------------------------------ config -- */
-
-let configCache: Awaited<ReturnType<typeof api.config>> | null = null
-
-function useAppConfig() {
-  const [config, setConfig] = React.useState(configCache)
-  React.useEffect(() => {
-    if (configCache) return
-    api
-      .config()
-      .then((c) => {
-        configCache = c
-        setConfig(c)
-      })
-      .catch(() => {})
-  }, [])
-  return config
-}
 
 /* ------------------------------------------------------------------ helpers -- */
 
@@ -57,10 +41,6 @@ function datetimeLocalToMs(v: string): number | undefined {
   return Number.isFinite(ms) ? ms : undefined
 }
 
-function msToDatetimeLocal(ms: number): string {
-  const d = new Date(ms - new Date().getTimezoneOffset() * 60_000)
-  return d.toISOString().slice(0, 16)
-}
 
 function copyJson(value: unknown) {
   navigator.clipboard?.writeText(JSON.stringify(value, null, 2)).catch(() => {})
@@ -114,8 +94,6 @@ export function MessagesPage({
     const raw = window.location.hash.slice(1) || "/messages"
     const qIdx = raw.indexOf("?")
     const params = new URLSearchParams(qIdx === -1 ? "" : raw.slice(qIdx + 1))
-    if (id !== null) params.set("msg", id)
-    else params.delete("msg")
     const qs = params.toString()
     window.location.hash = `/messages${id !== null ? `/${encodeURIComponent(id)}` : ""}${qs ? `?${qs}` : ""}`
   }, [])
@@ -123,8 +101,10 @@ export function MessagesPage({
     setOpenIdState(messageId ?? null)
   }, [messageId])
   const [selected, setSelected] = React.useState<Set<string>>(new Set())
+  const [bulkBusy, setBulkBusy] = React.useState(false)
 
   const config = useAppConfig()
+  const readonly = config?.readonly === true
   const detail = useMessageDetail(openId)
   useEscToClose(() => setOpenId(null))
   // stop background polling while the detail panel is open so it doesn't rerender under the cursor
@@ -248,8 +228,9 @@ export function MessagesPage({
 
   const runBulk = async (action: BulkActionKind) => {
     const ids = [...selected]
-    if (ids.length === 0) return
+    if (ids.length === 0 || bulkBusy) return
     const label = action === "delete" ? "Delete" : "Retry"
+    setBulkBusy(true)
     if (
       !(await confirmDialog({
         title: `${label} ${ids.length} message${ids.length === 1 ? "" : "s"}?`,
@@ -275,6 +256,8 @@ export function MessagesPage({
       const msg = e instanceof Error ? e.message : String(e)
       setActionError(msg)
       toast.error(`${label.toLowerCase()} failed: ${msg}`)
+    } finally {
+      setBulkBusy(false)
     }
   }
 
@@ -414,10 +397,22 @@ export function MessagesPage({
       {selected.size > 0 && (
         <div className="mb-3 flex items-center gap-2 rounded-md border border-kumo-line bg-kumo-canvas/50 px-3 py-2 text-[13px]">
           <span className="font-medium tabular-nums">{selected.size} selected</span>
-          <Button variant="secondary" size="sm" onClick={() => runBulk("retry")}>
-            ⟳ retry selected
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={bulkBusy || readonly}
+            title={readonly ? "read-only mode" : undefined}
+            onClick={() => runBulk("retry")}
+          >
+            <ArrowClockwise className="h-3.5 w-3.5" /> retry selected
           </Button>
-          <Button variant="danger" size="sm" onClick={() => runBulk("delete")}>
+          <Button
+            variant="danger"
+            size="sm"
+            disabled={bulkBusy || readonly}
+            title={readonly ? "read-only mode" : undefined}
+            onClick={() => runBulk("delete")}
+          >
             <Trash className="h-3.5 w-3.5" /> delete selected
           </Button>
           <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
@@ -448,11 +443,10 @@ export function MessagesPage({
               <TH>Tag</TH>
               <TH>Shard</TH>
               <TH>Replies</TH>
-              <TH>
+              <TH aria-sort={sort === "id" ? "descending" : "ascending"}>
                 <button
                   type="button"
                   title="toggle server-side sort"
-                  aria-sort={sort === "id" ? "descending" : "ascending"}
                   className="cursor-pointer"
                   onClick={() => {
                     setSort((prev) => (prev === "id" ? "deliverAt" : "id"))
@@ -595,11 +589,13 @@ function MessageRow({
           )}
           <button
             type="button"
-            title="delete message"
+            title={config?.readonly ? "read-only mode" : "delete message"}
             aria-label={`delete message ${m.id}`}
-            className="cursor-pointer rounded px-1 text-kumo-subtle hover:bg-kumo-danger-tint hover:text-kumo-danger"
+            disabled={config?.readonly === true}
+            className="cursor-pointer rounded p-1.5 text-kumo-subtle hover:bg-kumo-danger-tint hover:text-kumo-danger disabled:cursor-not-allowed disabled:opacity-40"
             onClick={(e) => {
               e.stopPropagation()
+              if (config?.readonly) return
               onDelete()
             }}
           >
@@ -668,6 +664,7 @@ function MessageDetailBody({
   onChanged: () => void
 }) {
   const m = d.message
+  const readonly = config?.readonly === true
   const [busy, setBusy] = React.useState(false)
 
   const act = async (fn: () => Promise<unknown>, what: string) => {
@@ -723,7 +720,7 @@ function MessageDetailBody({
           {m.entityType}/{m.entityId}
         </Field>
         <Field label="Shard">{m.shardId}</Field>
-        <Field label="Last read">{m.lastRead ?? "—"}</Field>
+        <Field label="Last read">{fmtLastRead(m.lastRead)}</Field>
         <Field label="Deliver at">
           {m.deliverAt !== null ? `${fmtTime(m.deliverAt)} (${fmtCountdown(m.deliverAt)})` : "—"}
         </Field>
@@ -746,14 +743,21 @@ function MessageDetailBody({
             <Button
               variant="secondary"
               size="sm"
-              disabled={busy}
+              disabled={busy || readonly}
+              title={readonly ? "read-only mode" : undefined}
               onClick={() => act(() => api.retryMessage(m.id), "retry")}
             >
-              ⟳ retry
+              <ArrowClockwise className="h-3.5 w-3.5" /> retry
             </Button>
           )}
           {canInterrupt && (
-            <Button variant="danger" size="sm" disabled={busy} onClick={() => act(() => api.interruptMessage(m.id), "interrupt")}>
+            <Button
+              variant="danger"
+              size="sm"
+              disabled={busy || readonly}
+              title={readonly ? "read-only mode" : undefined}
+              onClick={() => act(() => api.interruptMessage(m.id), "interrupt")}
+            >
               <XCircle className="h-3.5 w-3.5" /> interrupt
             </Button>
           )}
@@ -761,11 +765,22 @@ function MessageDetailBody({
             <Button
               variant="secondary"
               size="sm"
-              disabled={busy}
-              title="clear processed/last_read so the engine re-runs this activity"
+              disabled={busy || readonly}
+              title={readonly ? "read-only mode" : "clear processed/last_read so the engine re-runs this activity"}
               onClick={() => act(() => api.resetActivity(m.id), "reset activity")}
             >
-              ↺ reset activity
+              <ArrowCounterClockwise className="h-3.5 w-3.5" /> reset activity
+            </Button>
+          )}
+          {clusterKind === "redis" && m.status === "scheduled" && (
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={busy || readonly}
+              title={readonly ? "read-only mode" : "make this delayed job pending immediately (redis clusters)"}
+              onClick={() => act(() => api.promoteJob(m.id), "promote")}
+            >
+              <ArrowUpRight className="h-3.5 w-3.5" /> promote now
             </Button>
           )}
           <span className="ml-auto flex items-center gap-1">
@@ -786,7 +801,7 @@ function MessageDetailBody({
             <PayloadView value={d.payload} />
           </div>
           <Button variant="ghost" size="sm" onClick={() => copyJson(d.payload)} title="copy payload">
-            ⧉
+            <Copy className="h-3.5 w-3.5" />
           </Button>
         </div>
       </section>
@@ -820,10 +835,10 @@ function MessageDetailBody({
                     <button
                       type="button"
                       title="copy reply"
-                      className="cursor-pointer hover:text-kumo-default"
+                      className="cursor-pointer p-1 hover:text-kumo-default"
                       onClick={() => copyJson(r.payload)}
                     >
-                      ⧉
+                      <Copy className="h-3.5 w-3.5" />
                     </button>
                   </span>
                 </div>
@@ -870,6 +885,15 @@ export function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
     <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-kumo-subtle">{children}</h3>
   )
+}
+
+/** "Last read" arrives as a raw machine string — render it with the same
+ * fmtTime convention as neighboring fields when parseable (audit #2). */
+function fmtLastRead(raw: string | null): string {
+  if (raw === null || raw === "") return "—"
+  const n = Number(raw)
+  const ms = Number.isFinite(n) && raw.trim() !== "" ? n : new Date(raw).getTime()
+  return Number.isFinite(ms) && ms > 0 ? fmtTime(ms) : raw
 }
 
 function shortId(id: string) {

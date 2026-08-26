@@ -12,8 +12,11 @@ import { confirmDialog } from "../components/dialogs.tsx"
 import { toast } from "../toast.tsx"
 import { Badge, Button, Card, CardContent, CardHeader, CardTitle } from "../components/ui.tsx"
 import { Banner, Text, cn } from "../kumo"
+import { ArrowClockwise, Check, Copy, X, XCircle } from "@phosphor-icons/react"
 import { fmtTime } from "../format.ts"
+import { useExport } from "../export.ts"
 import { triggerRefresh } from "../shell.tsx"
+import { useAppConfig } from "../config.ts"
 
 /** the run row carries extra server fields beyond the base client type */
 interface RunExtras {
@@ -47,6 +50,7 @@ export function WorkflowRunPage({
   const [busy, setBusy] = React.useState(false)
   const [timelineOpen, setTimelineOpen] = React.useState(true)
   const [view, setView] = React.useState<"timeline" | "graph">("timeline")
+  const readonly = useAppConfig()?.readonly === true
 
   const run = data?.run ?? null
   const extras = (run ?? null) as (WorkflowRunDetail["run"] & RunExtras) | null
@@ -55,9 +59,27 @@ export function WorkflowRunPage({
 
   // waterfall spans: run message + its activities on one shared axis; an
   // activity's bar runs until the next event (gaps between events are the signal)
+  const activities = React.useMemo(
+    () => [...((data?.activities ?? []) as ActivityRow[])].sort((a, b) => a.createdAt - b.createdAt),
+    [data?.activities]
+  )
+  const activityExportRows = React.useMemo(
+    () =>
+      activities.map((a) => ({
+        id: a.id,
+        tag: a.tag,
+        kind: a.kind,
+        status: a.status,
+        failed: a.failed === true,
+        attempt: a.attempt,
+        createdAt: a.createdAt
+      })),
+    [activities]
+  )
+  const exporters = useExport(activityExportRows, `run-${executionId}`)
   const timelineSpans = React.useMemo(() => {
     if (!run) return []
-    const activities = [...((data?.activities ?? []) as ActivityRow[])].sort((a, b) => a.createdAt - b.createdAt)
+    const acts = activities
     const spans: TimelineSpan[] = [
       {
         key: `run-${run.id}`,
@@ -160,7 +182,22 @@ export function WorkflowRunPage({
     }
   }
 
-  if (error) return <span className="text-[13px] text-kumo-danger">{error}</span>
+  if (error)
+    return (
+      <div>
+        {/* bare-span error replaced with ErrorNote + retry (UX audit #2) */}
+        <div className="mb-3 flex items-start justify-between gap-3 rounded-md border border-kumo-danger/30 bg-kumo-danger-tint px-3 py-2 text-[13px] text-kumo-danger">
+          <span>{error}</span>
+          <button
+            type="button"
+            onClick={() => reload.current()}
+            className="shrink-0 cursor-pointer rounded-md border border-kumo-danger/40 px-2 py-0.5 text-[12px] font-medium hover:bg-kumo-danger-tint"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    )
   if (!data) return <span className="text-[13px] text-kumo-subtle">loading…</span>
   if (!run) return <span className="text-[13px] text-kumo-subtle">run message not found</span>
 
@@ -249,17 +286,17 @@ export function WorkflowRunPage({
       {(canRetry || canCancel) && (
         <section className="flex items-center gap-2">
           {canRetry && (
-            <Button size="sm" disabled={busy} onClick={() => void act("retry")}>
-              ↻ retry run
+            <Button size="sm" disabled={busy || readonly} title={readonly ? "read-only mode" : undefined} onClick={() => void act("retry")}>
+              <ArrowClockwise className="h-3.5 w-3.5" /> retry run
             </Button>
           )}
           {canCancel && (
-            <Button size="sm" variant="danger" disabled={busy} onClick={() => void act("interrupt")}>
-              ✕ cancel run
+            <Button size="sm" variant="danger" disabled={busy || readonly} title={readonly ? "read-only mode" : undefined} onClick={() => void act("interrupt")}>
+              <X className="h-3.5 w-3.5" /> cancel run
             </Button>
           )}
           <span className="text-[11px] text-kumo-subtle">
-            writes go through the cluster's own storage semantics
+            retry re-runs the workflow from its first pending activity
           </span>
         </section>
       )}
@@ -272,8 +309,26 @@ export function WorkflowRunPage({
       </section>
 
       <section>
-        <h3 className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-kumo-subtle">
-          Activity timeline ({data.activities.length})
+        <h3 className="mb-2 flex items-center justify-between gap-2 text-[11px] font-semibold uppercase tracking-wide text-kumo-subtle">
+          <span>Activity timeline ({data.activities.length})</span>
+          <span className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={activityExportRows.length === 0}
+              onClick={exporters.json}
+            >
+              export (json)
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={activityExportRows.length === 0}
+              onClick={exporters.csv}
+            >
+              export (csv)
+            </Button>
+          </span>
         </h3>
         {data.activities.length === 0 ? (
           <span className="text-kumo-subtle">no activities recorded</span>
@@ -325,8 +380,9 @@ function OutcomeBanner({ outcome, exit }: { outcome: "Success" | "Failure"; exit
       )}
     >
       <div className="flex items-center justify-between gap-2">
-        <strong className="text-[13px]">
-          {ok ? "✓ run completed successfully" : "✕ run failed"}
+        <strong className="flex items-center gap-1.5 text-[13px]">
+          {ok ? <Check className="h-4 w-4 text-kumo-success" /> : <XCircle className="h-4 w-4 text-kumo-danger" />}
+          {ok ? "run completed successfully" : "run failed"}
         </strong>
         <Badge tone={ok ? "ok" : "err"}>{outcome}</Badge>
       </div>

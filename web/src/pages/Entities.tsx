@@ -3,15 +3,17 @@ import { api, type EntityStat } from "../api.ts"
 import {
   ActivityDot,
   FilterChip,
+  ScheduledBadge,
   SkeletonTable,
   SortableTh,
   STICKY_TH,
   useHashParam,
   useSort
 } from "../components/pieces.tsx"
-import { Badge, Input, Table, TBody, TD, THead, TR } from "../components/ui.tsx"
+import { Badge, Button, Input, Table, TBody, TD, THead, TR } from "../components/ui.tsx"
 import { FilterBar, presenceFacet, useFacets, type FacetDef } from "../components/filters/index.tsx"
 import { ErrorNote, PageHeader, usePolling } from "../shell.tsx"
+import { useExport } from "../export.ts"
 
 export function EntitiesPage() {
   const [rows, setRows] = React.useState<EntityStat[]>([])
@@ -34,12 +36,28 @@ export function EntitiesPage() {
   ]
   const facets = useFacets(rows, facetDefs)
 
-  if (loading && rows.length === 0) return <SkeletonTable />
   const qLower = q.toLowerCase()
   const filtered = facets.filtered.filter(
     (r) => qLower === "" || r.entityType.toLowerCase().includes(qLower)
   )
   const sorted = sort.sorted(filtered)
+  // hooks must run unconditionally (early return below would break the rules of hooks)
+  const exportRows = React.useMemo(
+    () =>
+      sorted.map((r) => ({
+        entityType: r.entityType,
+        entities: r.entities,
+        messages: r.messages,
+        pending: r.pending,
+        inflight: r.inflight,
+        scheduled: r.scheduled,
+        done: r.done
+      })),
+    [sorted]
+  )
+  const exporters = useExport(exportRows, "entities")
+
+  if (loading && rows.length === 0) return <SkeletonTable />
 
   return (
     <div>
@@ -52,6 +70,14 @@ export function EntitiesPage() {
           className="w-56"
           data-search-input
         />
+        <span className="flex items-center gap-1">
+          <Button variant="ghost" size="sm" disabled={exportRows.length === 0} onClick={exporters.json}>
+            export page (json)
+          </Button>
+          <Button variant="ghost" size="sm" disabled={exportRows.length === 0} onClick={exporters.csv}>
+            export page (csv)
+          </Button>
+        </span>
       </PageHeader>
       <FilterBar defs={facetDefs} rows={rows} facets={facets} />
       <ErrorNote error={error} onRetry={refresh} />
@@ -121,7 +147,7 @@ export function EntitiesPage() {
                     {r.inflight > 0 ? <Badge tone="info">{r.inflight}</Badge> : <span className="text-kumo-subtle">0</span>}
                   </TD>
                   <TD className="text-right tabular-nums">
-                    {r.scheduled > 0 ? <Badge tone="accent">{r.scheduled}</Badge> : <span className="text-kumo-subtle">0</span>}
+                    {r.scheduled > 0 ? <ScheduledBadge count={r.scheduled} /> : <span className="text-kumo-subtle">0</span>}
                   </TD>
                   <TD className="text-right tabular-nums text-kumo-subtle">{r.done}</TD>
                   <TD>

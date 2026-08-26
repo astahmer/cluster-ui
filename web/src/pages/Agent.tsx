@@ -146,7 +146,10 @@ export function AgentPage() {
         },
         model: { model: config.model || MODEL_PLACEHOLDERS[config.provider] }
       }),
-    [config.provider, config.apiKey, config.model, config.cluster, globalCluster]
+    // NOTE: globalCluster deliberately NOT a dep — the fetch shim reads
+    // getCluster() per request, so an ambient cluster switch must not rebuild
+    // the runtime (that would wipe the conversation). (UX audit #2 A5)
+    [config.provider, config.apiKey, config.model, config.cluster]
   )
 
   return (

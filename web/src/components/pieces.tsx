@@ -1,5 +1,6 @@
 import * as React from "react"
 import { SkeletonLine } from "../kumo"
+import { CaretDown, CaretRight, X } from "@phosphor-icons/react"
 import { TH } from "./ui.tsx"
 import { api, type MessageDetail, type MessageStatus } from "../api.ts"
 import { relTime } from "../format.ts"
@@ -138,7 +139,7 @@ export function DetailPanel({
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-sm font-semibold">{title}</h2>
           <Button variant="ghost" size="sm" onClick={onClose}>
-            ✕ close
+            <X className="h-3.5 w-3.5" /> close
           </Button>
         </div>
         {children}
@@ -274,7 +275,7 @@ export function SortableTh({
   const active = sort.sortKey === sortKey
   return (
     <TH
-      className={cn("sticky top-0 z-10 bg-kumo-base p-0", active && "text-kumo-default", className)}
+      className={cn(`${STICKY_TH} p-0`, active && "text-kumo-default", className)}
       aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}
     >
       <button
@@ -419,10 +420,33 @@ export function FilterChip({ label, onRemove }: { label: React.ReactNode; onRemo
         type="button"
         aria-label={`clear filter ${typeof label === "string" ? label : ""}`.trim()}
         onClick={onRemove}
-        className="cursor-pointer px-0.5 text-[11px] leading-none opacity-70 hover:opacity-100"
+        className="-my-1 -mr-1 cursor-pointer p-1 text-[11px] leading-none opacity-70 hover:opacity-100"
       >
-        ✕
+        <X className="h-3 w-3" />
       </button>
+    </Badge>
+  )
+}
+
+/** Shared dashed-outline treatment for "scheduled" (UX audit #2 A7) — visually
+ * distinct from pending (amber) and inflight (blue info) everywhere. Accepts
+ * plain children, a numeric count, or a text label for column use. */
+export const SCHEDULED_BADGE_CLASS =
+  "border border-dashed border-kumo-brand bg-transparent !text-kumo-link"
+
+export function ScheduledBadge({
+  children,
+  count,
+  label
+}: {
+  children?: React.ReactNode
+  count?: number
+  label?: string
+}) {
+  const content = children ?? (count !== undefined ? String(count) : label) ?? "scheduled"
+  return (
+    <Badge tone="neutral" className={SCHEDULED_BADGE_CLASS}>
+      {content}
     </Badge>
   )
 }
@@ -448,7 +472,7 @@ export function Pager({
     <div className="mt-3 flex items-center justify-end gap-2 text-[13px] text-kumo-subtle">
       <button
         type="button"
-        className="cursor-pointer rounded-md border border-kumo-line px-2 py-0.5 text-[12px] font-medium text-kumo-default disabled:cursor-not-allowed disabled:opacity-50"
+        className="min-h-[28px] cursor-pointer rounded-md border border-kumo-line px-3 py-1 text-[12px] font-medium text-kumo-default disabled:cursor-not-allowed disabled:opacity-50"
         disabled={page <= 1}
         onClick={() => onChange(page - 1)}
       >
@@ -459,7 +483,7 @@ export function Pager({
       </span>
       <button
         type="button"
-        className="cursor-pointer rounded-md border border-kumo-line px-2 py-0.5 text-[12px] font-medium text-kumo-default disabled:cursor-not-allowed disabled:opacity-50"
+        className="min-h-[28px] cursor-pointer rounded-md border border-kumo-line px-3 py-1 text-[12px] font-medium text-kumo-default disabled:cursor-not-allowed disabled:opacity-50"
         disabled={page >= pages}
         onClick={() => onChange(page + 1)}
       >

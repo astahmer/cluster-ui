@@ -5,8 +5,10 @@ import { fmtCountdown, fmtTime, relTime } from "../format.ts"
 import { ErrorNote, PageHeader, usePolling } from "../shell.tsx"
 import { ClockCounterClockwise } from "@phosphor-icons/react"
 import { Checkbox, Empty } from "../kumo"
-import { FilterChip, SkeletonTable, SortableTh, STICKY_TH, useHashParam, useSort } from "../components/pieces.tsx"
+import { FilterChip, ScheduledBadge, SkeletonTable, SortableTh, STICKY_TH, useHashParam, useSort } from "../components/pieces.tsx"
 import { FilterBar, presenceFacet, useFacets, type FacetDef } from "../components/filters/index.tsx"
+import { useExport } from "../export.ts"
+import { Button } from "../components/ui.tsx"
 
 function statusToneFor(status: CronJob["lastStatus"]) {
   switch (status) {
@@ -50,12 +52,24 @@ export function CronsPage() {
   ]
   const facets = useFacets(rows, facetDefs)
 
-  if (loading && rows.length === 0) return <SkeletonTable />
-
+  // hooks must run unconditionally (early return below would break the rules of hooks)
   const overdue = (c: CronJob) =>
     c.lastStatus !== "done" && c.nextRunAt !== null && c.nextRunAt < Date.now()
-
   const visible = facets.filtered.filter((c) => !overdueOnly || overdue(c))
+  const exportRows = React.useMemo(
+    () =>
+      visible.map((c) => ({
+        name: c.name,
+        entityType: c.entityType,
+        lastStatus: c.lastStatus,
+        lastRunAt: c.lastRunAt,
+        nextRunAt: c.nextRunAt
+      })),
+    [visible]
+  )
+  const exporters = useExport(exportRows, "crons")
+
+  if (loading && rows.length === 0) return <SkeletonTable />
 
   return (
     <div>
@@ -67,6 +81,14 @@ export function CronsPage() {
           <Checkbox checked={overdueOnly} onCheckedChange={(checked) => setOverdueOnlyParam(Boolean(checked))} />
           overdue only
         </label>
+        <span className="flex items-center gap-1">
+          <Button variant="ghost" size="sm" disabled={exportRows.length === 0} onClick={exporters.json}>
+            export page (json)
+          </Button>
+          <Button variant="ghost" size="sm" disabled={exportRows.length === 0} onClick={exporters.csv}>
+            export page (csv)
+          </Button>
+        </span>
       </PageHeader>
       <FilterBar defs={facetDefs} rows={rows} facets={facets} />
       <ErrorNote error={error} onRetry={refresh} />
@@ -115,7 +137,12 @@ export function CronsPage() {
                     )}
                   </TD>
                   <TD>
-                    <Badge tone={statusToneFor(c.lastStatus)}>{c.lastStatus}</Badge>
+                    {/* A7: scheduled must not read as info-blue like in-flight */}
+                    {c.lastStatus === "scheduled" ? (
+                      <ScheduledBadge label="scheduled" />
+                    ) : (
+                      <Badge tone={statusToneFor(c.lastStatus)}>{c.lastStatus}</Badge>
+                    )}
                   </TD>
                 </TR>
               ))}

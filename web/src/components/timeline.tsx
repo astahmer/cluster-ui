@@ -46,6 +46,19 @@ function niceTicks(t0: number, t1: number): number[] {
   return ticks
 }
 
+/** Display ticks (UX audit #2): always include both edges, thin interior to at
+ * most 3 nice steps → ~5 labels total, so a narrow modal never renders an
+ * unreadable run-on of colliding tick labels. */
+function displayTicks(t0: number, t1: number): number[] {
+  const interior = niceTicks(t0, t1).filter((t) => t > t0 && t < t1)
+  let picked = interior
+  if (interior.length > 3) {
+    // evenly resample the interior down to 3 (indices guaranteed distinct)
+    picked = [0, 1, 2].map((i) => interior[Math.round((i * (interior.length - 1)) / 2)])
+  }
+  return [...new Set([t0, ...picked, t1])]
+}
+
 /** sub-second-precise label for waterfall axis ticks (fmtDuration rounds to whole seconds) */
 function axisLabel(ms: number): string {
   if (ms <= 0) return "0"
@@ -80,7 +93,7 @@ export function SpanWaterfall({
   const range = Math.max(t1 - t0, 1)
   const pct = (t: number) => ((t - t0) / range) * 100
 
-  const ticks = niceTicks(t0, t1)
+  const ticks = displayTicks(t0, t1)
 
   let lastGroup: string | undefined
   let seenKey = new Set<string>()
@@ -91,15 +104,24 @@ export function SpanWaterfall({
         {/* shared time axis */}
         <div className="relative border-b border-kumo-line bg-kumo-recessed px-3 py-1.5">
           <div className="relative ml-[208px] h-4">
-            {ticks.map((t) => (
-              <span
-                key={t}
-                className="absolute top-0 -translate-x-1/2 text-[10px] tabular-nums text-kumo-subtle"
-                style={{ left: `${pct(t)}%` }}
-              >
-                {t - t0 === 0 ? "0" : axisLabel(t - t0)}
-              </span>
-            ))}
+            {ticks.map((t) => {
+              const isFirst = t === t0
+              const isLast = t === t1
+              return (
+                <span
+                  key={t}
+                  className={cn(
+                    "absolute top-0 text-[10px] tabular-nums text-kumo-subtle",
+                    // edge labels are pinned inside the container instead of
+                    // centering on the tick, so neither half ever clips
+                    isFirst ? "translate-x-0" : isLast ? "-translate-x-full" : "-translate-x-1/2"
+                  )}
+                  style={{ left: `${pct(t)}%` }}
+                >
+                  {isFirst ? "0" : axisLabel(t - t0)}
+                </span>
+              )
+            })}
           </div>
         </div>
 

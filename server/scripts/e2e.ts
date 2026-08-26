@@ -82,10 +82,11 @@ async function runChecks() {
     Array.isArray(b) && b.every((s: any) => Date.now() - s.t <= 120_000))
 
   // ---- traces ----------------------------------------------------------
+  // /api/traces is offset-paged (P1-15): { rows: [...], total }
   const traces = await check("traces list", "/api/traces", (b) =>
-    Array.isArray(b) && b.length > 0 && typeof b[0].traceId === "string" && b[0].count >= 1)
-  const traceRows = await check("trace detail", `/api/traces/${encodeURIComponent(traces[0].traceId)}`,
-    (b) => Array.isArray(b.rows) && b.rows.length === traces[0].count && b.rows.every((r: any) => r.traceId === traces[0].traceId))
+    Array.isArray(b.rows) && b.rows.length > 0 && typeof b.rows[0].traceId === "string" && b.rows[0].count >= 1)
+  const traceRows = await check("trace detail", `/api/traces/${encodeURIComponent(traces.rows[0].traceId)}`,
+    (b) => Array.isArray(b.rows) && b.rows.length === traces.rows[0].count && b.rows.every((r: any) => r.traceId === traces.rows[0].traceId))
   void traceRows
   const wfs = await check("workflows", "/api/workflows", (b) =>
     Array.isArray(b) && b.every((w: any) => "failedRuns" in w))

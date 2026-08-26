@@ -1,6 +1,7 @@
 import * as React from "react"
 import { SquaresFour, Cpu, GridFour, Cube, ClockCounterClockwise, FlowArrow, ListDashes, CirclesThree, List, Stack, Sparkle, Plugs, MagnifyingGlass, QueueIcon, Moon, Sun } from "@phosphor-icons/react"
 import { api, getCluster, onClusterChange, setCluster } from "./api.ts"
+import { useAppConfig } from "./config.ts"
 import { toast } from "./toast.tsx"
 import * as live from "./live.ts"
 import { useFreshness } from "./freshness.ts"
@@ -129,10 +130,26 @@ function applyTheme(mode: string) {
     if (mode === "system") localStorage.removeItem(THEME_KEY)
     else localStorage.setItem(THEME_KEY, mode)
   } catch {}
+  // reactive consumers (TopBar icon, palette) re-render on this
+  window.dispatchEvent(new CustomEvent("ui:theme"))
 }
 
 function initialSystemTheme(): string {
   return window.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark"
+}
+
+/** Resolved current mode ("light"|"dark") as reactive state — updates on applyTheme. */
+function useThemeMode(): "light" | "dark" {
+  const resolve = (): "light" | "dark" =>
+    (document.documentElement.dataset.mode ?? initialTheme()) === "light" ? "light" : "dark"
+  const [mode, setMode] = React.useState(resolve)
+  React.useEffect(() => {
+    const sync = () => setMode(resolve())
+    window.addEventListener("ui:theme", sync)
+    return () => window.removeEventListener("ui:theme", sync)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  return mode
 }
 
 function initialTheme(): string {
@@ -221,6 +238,8 @@ function TopBar({ base, onMenu, onOpenPalette }: { base: string; onMenu: () => v
   const [paused, togglePausedState] = live.usePaused()
   const [clusters, setClusters] = React.useState<string[]>([])
   const cluster = useCluster()
+  const config = useAppConfig()
+  const themeMode = useThemeMode()
 
   React.useEffect(() => {
     api
@@ -270,6 +289,16 @@ function TopBar({ base, onMenu, onOpenPalette }: { base: string; onMenu: () => v
         <List weight="bold" className="h-4 w-4" />
       </button>
 
+      {/* A6: palette is the only id-deep-link entry point — give touch devices an affordance */}
+      <button
+        type="button"
+        onClick={onOpenPalette}
+        aria-label="open command palette"
+        className="grid h-7 w-7 shrink-0 cursor-pointer place-items-center rounded-md text-kumo-subtle hover:bg-kumo-tint hover:text-kumo-default sm:hidden"
+      >
+        <MagnifyingGlass className="h-4 w-4" />
+      </button>
+
       <FreshnessIndicator />
 
       {/* centered command-palette trigger */}
@@ -302,6 +331,12 @@ function TopBar({ base, onMenu, onOpenPalette }: { base: string; onMenu: () => v
         </select>
       )}
 
+      {config?.readonly && (
+        <Badge tone="warn" title="read-only mode — write actions are disabled server-side">
+          read-only
+        </Badge>
+      )}
+
       <button
         type="button"
         onClick={() => togglePausedState(!paused)}
@@ -318,11 +353,7 @@ function TopBar({ base, onMenu, onOpenPalette }: { base: string; onMenu: () => v
         aria-label="toggle light/dark theme"
         className="grid h-7 w-7 cursor-pointer place-items-center rounded-md text-kumo-subtle hover:bg-kumo-tint hover:text-kumo-default"
       >
-        {(document.documentElement.dataset.mode ?? initialTheme()) === "dark" ? (
-          <Sun className="h-4 w-4" />
-        ) : (
-          <Moon className="h-4 w-4" />
-        )}
+        {themeMode === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
       </button>
 
       {/* hidden marker keeps keyboard shortcut logic aware of current section */}
@@ -336,6 +367,8 @@ export function Shell({ route, children }: { route: string; children: React.Reac
   const [navOpen, setNavOpen] = React.useState(false)
   const [paletteOpen, setPaletteOpen] = React.useState(false)
   const [clusterNames, setClusterNames] = React.useState<string[]>([])
+  // reactive so the palette label reflects the current paused state (audit: stale derived state)
+  const [livePaused] = live.usePaused()
 
   React.useEffect(() => {
     api
@@ -396,12 +429,12 @@ export function Shell({ route, children }: { route: string; children: React.Reac
       },
       {
         key: "live-pause-toggle",
-        label: live.isPaused() ? "Live refresh: resume" : "Live refresh: pause",
+        label: livePaused ? "Live refresh: resume" : "Live refresh: pause",
         keywords: "auto-refresh polling pause resume",
         run: () => live.setPaused(!live.isPaused())
       }
     ],
-    [clusterNames]
+    [clusterNames, livePaused]
   )
   const dynamicItems = React.useCallback(
     (query: string): PaletteItem[] => {
@@ -635,7 +668,7 @@ function SidebarContent({ base, onNavigate }: { base: string; onNavigate?: () =>
           ))}
         </nav>
         <div className="border-t border-kumo-line px-4 py-3 text-[11px] leading-4 text-kumo-subtle">
-          reads the cluster's SQL storage
+          reads the cluster's storage
           <br />
           <span className="text-kumo-subtle">1–9 switch · ⌘K palette · / search · esc close</span>
         </div>

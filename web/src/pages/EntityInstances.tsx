@@ -1,10 +1,11 @@
 import * as React from "react"
 import { api, type EntityInstance } from "../api.ts"
-import { ActivityDot, SkeletonTable, rowInteractions, Pager } from "../components/pieces.tsx"
+import { ActivityDot, ScheduledBadge, SkeletonTable, rowInteractions, Pager } from "../components/pieces.tsx"
 import { FilterBar, presenceFacet, useFacets, type FacetDef } from "../components/filters/index.tsx"
 import { Badge, Button, Input, Table, TBody, TD, TH, THead, TR } from "../components/ui.tsx"
 import { ErrorNote, PageHeader, usePolling } from "../shell.tsx"
 import { Empty } from "../kumo"
+import { useExport } from "../export.ts"
 
 export function EntityInstancesPage({ entityType }: { entityType: string }) {
   const [rows, setRows] = React.useState<EntityInstance[]>([])
@@ -37,6 +38,20 @@ export function EntityInstancesPage({ entityType }: { entityType: string }) {
     presenceFacet("pending", "currently pending", (r) => r.pending > 0)
   ]
   const facets = useFacets(rows, facetDefs)
+  const exportRows = React.useMemo(
+    () =>
+      facets.filtered.map((r) => ({
+        entityId: r.entityId,
+        total: r.total,
+        pending: r.pending,
+        inflight: r.inflight,
+        scheduled: r.scheduled,
+        done: r.done,
+        failed: r.failed
+      })),
+    [facets.filtered]
+  )
+  const exporters = useExport(exportRows, `${entityType}-instances`)
 
   if (loading && rows.length === 0) return <SkeletonTable rows={10} cols={4} />
 
@@ -58,6 +73,16 @@ export function EntityInstancesPage({ entityType }: { entityType: string }) {
           data-search-input
         />
       </PageHeader>
+      {/* A1: facet machinery existed but the bar was never rendered */}
+      <FilterBar defs={facetDefs} rows={rows} facets={facets} />
+      <div className="mb-2 flex items-center justify-end gap-1">
+        <Button variant="ghost" size="sm" disabled={rows.length === 0} onClick={exporters.json}>
+          export page (json)
+        </Button>
+        <Button variant="ghost" size="sm" disabled={rows.length === 0} onClick={exporters.csv}>
+          export page (csv)
+        </Button>
+      </div>
       <ErrorNote error={error} onRetry={refresh} />
 
       <div className="rounded-lg border border-kumo-line bg-kumo-base">
@@ -92,7 +117,7 @@ export function EntityInstancesPage({ entityType }: { entityType: string }) {
                   {r.inflight > 0 ? <Badge tone="info">{r.inflight}</Badge> : <span className="text-kumo-subtle">0</span>}
                 </TD>
                 <TD className="text-right tabular-nums">
-                  {r.scheduled > 0 ? <Badge tone="accent">{r.scheduled}</Badge> : <span className="text-kumo-subtle">0</span>}
+                  {r.scheduled > 0 ? <ScheduledBadge count={r.scheduled} /> : <span className="text-kumo-subtle">0</span>}
                 </TD>
                 <TD className="text-right tabular-nums text-kumo-subtle">{r.done}</TD>
                 <TD className="text-right tabular-nums">

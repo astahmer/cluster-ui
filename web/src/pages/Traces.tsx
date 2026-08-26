@@ -1,12 +1,13 @@
 import * as React from "react"
 import { Stack } from "@phosphor-icons/react"
 import { api, type Message, type TraceSummary } from "../api.ts"
-import { Badge, Table, TBody, TD, TH, THead, TR } from "../components/ui.tsx"
+import { Badge, Button, Input, Table, TBody, TD, TH, THead, TR } from "../components/ui.tsx"
 import { DetailPanel, SkeletonTable, StatusBadge, rowInteractions, Pager } from "../components/pieces.tsx"
 import { SpanWaterfall, type TimelineSpan } from "../components/timeline.tsx"
 import { ErrorNote, PageHeader, useEscToClose, useLive } from "../shell.tsx"
 import { Empty } from "../kumo"
 import { fmtTime } from "../format.ts"
+import { useExport } from "../export.ts"
 
 /**
  * Traces — messages grouped by trace id.
@@ -47,6 +48,20 @@ export function TracesPage() {
 
   useEscToClose(() => setOpenTraceId(null))
 
+  // UX-AUDIT-2: shared export affordance over the currently visible page
+  const exportRows = React.useMemo(
+    () =>
+      (rows ?? []).map((t) => ({
+        traceId: t.traceId,
+        spans: t.count,
+        services: t.services.join(","),
+        firstSpanAt: t.firstAt,
+        lastSpanAt: t.lastAt
+      })),
+    [rows]
+  )
+  const exporters = useExport(exportRows, "traces")
+
   if (loading && rows === null) return <SkeletonTable />
   const traces = rows ?? []
   const from = total === 0 ? 0 : (page - 1) * pageSize + 1
@@ -55,13 +70,22 @@ export function TracesPage() {
   return (
     <div>
       <PageHeader title="Traces" subtitle="messages grouped by trace id — newest first">
-        <input
+        <Input
           aria-label="search traces"
           placeholder="filter by trace id…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="w-56 rounded-md border border-kumo-line bg-kumo-canvas px-2 py-1 text-[12px] text-kumo-default outline-none placeholder:text-kumo-subtle focus:border-kumo-brand"
+          className="w-56"
+          data-search-input
         />
+        <span className="flex items-center gap-1">
+          <Button variant="ghost" size="sm" disabled={exportRows.length === 0} onClick={exporters.json}>
+            export page (json)
+          </Button>
+          <Button variant="ghost" size="sm" disabled={exportRows.length === 0} onClick={exporters.csv}>
+            export page (csv)
+          </Button>
+        </span>
         <span className="text-[12px] text-kumo-subtle">click a trace for its waterfall</span>
       </PageHeader>
       <ErrorNote error={error} onRetry={refresh} />
@@ -81,7 +105,11 @@ export function TracesPage() {
               <TH>Services</TH>
               <TH>First span</TH>
               <TH>Last span</TH>
-              <TH className="text-right">Duration</TH>
+              {/* this column is the first→last creation window, NOT critical-path
+                  duration — say so where people read it (UX audit #2) */}
+              <TH className="text-right" title="time from first to last span creation — individual span durations live in the waterfall">
+                Duration
+              </TH>
             </TR>
           </THead>
           <TBody>
@@ -115,7 +143,13 @@ export function TracesPage() {
                   </TD>
                   <TD className="text-kumo-subtle">{fmtTime(t.firstAt)}</TD>
                   <TD className="text-kumo-subtle">{fmtTime(t.lastAt)}</TD>
-                  <TD className="text-right tabular-nums">{formatDuration(traceDurationHint(t))}</TD>
+                  <TD className="text-right tabular-nums">
+                    <span
+                      title="first → last span creation window — see the waterfall for real span durations"
+                    >
+                      {formatDuration(traceDurationHint(t))}
+                    </span>
+                  </TD>
                 </TR>
               )
             })}

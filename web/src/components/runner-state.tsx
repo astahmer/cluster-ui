@@ -1,7 +1,9 @@
 import * as React from "react"
-import { api, type RunnerFibersReport, type RunnerLogsReport } from "../api.ts"
+import { CaretDown, CaretRight } from "@phosphor-icons/react"
+import { api, type RunnerFibersReport, type RunnerLogsReport, type ReporterLogLine } from "../api.ts"
 import { Badge } from "./ui.tsx"
 import { useLive } from "../shell.tsx"
+import { SkeletonTable } from "./pieces.tsx"
 
 /**
  * Runtime panel for the Runtime (singletons) page — per reporting-runner fiber snapshots
@@ -15,26 +17,40 @@ export function RunnerRuntimePanel({
   /** optional cluster name passed through to the fan-out routes */
   cluster?: string
 }) {
+  const lastSeenRef = React.useRef<number | undefined>(undefined)
   const [logs, setLogs] = React.useState<RunnerLogsReport[]>([])
   const [fibers, setFibers] = React.useState<RunnerFibersReport[]>([])
 
   const { loading, error, refresh } = useLive(async () => {
     const sinceMs = lastSeenRef.current
-    const [l, f] = await Promise.all([api.runnerLogs(cluster), api.runnerFibers(cluster)])
-    setLogs(l.runners)
+    const [l, f] = await Promise.all([
+      // incremental tail: after the first poll, ask the server only for newer
+      // lines (server /api/logs supports ?since=); dedup on merge for safety
+      api.runnerLogs(cluster, sinceMs !== undefined ? { since: sinceMs } : undefined),
+      api.runnerFibers(cluster)
+    ])
+    setLogs((prev) => {
+      if (sinceMs === undefined) return l.runners
+      const byAddress = new Map(prev.map((r) => [r.address, r]))
+      return l.runners.map((r) => {
+        const before = byAddress.get(r.address)
+        if (!before) return r
+        const seen = new Set((before.lines ?? []).map((line) => `${line.t}\u0000${line.text}`))
+        const fresh = (r.lines ?? []).filter((line) => !seen.has(`${line.t}\u0000${line.text}`))
+        return { ...r, lines: [...(before.lines ?? []), ...fresh] as ReporterLogLine[] }
+      })
+    })
     setFibers(f.runners)
     // remember newest timestamp so the next poll asks only for newer lines
     const allT = l.runners.flatMap((r) => (r.lines ?? []).map((line) => line.t))
     if (allT.length > 0) lastSeenRef.current = Math.max(...allT) + 1
   }, [cluster])
 
-  const lastSeenRef = React.useRef<number | undefined>(undefined)
-
   const addresses = [...new Set([...logs.map((r) => r.address), ...fibers.map((r) => r.address)])]
   const logsByAddress = new Map(logs.map((r) => [r.address, r]))
   const fibersByAddress = new Map(fibers.map((r) => [r.address, r]))
 
-  if (loading && addresses.length === 0) return null
+  if (loading && addresses.length === 0) return <SkeletonTable rows={3} cols={2} />
 
   return (
     <div className="space-y-3">
@@ -93,7 +109,7 @@ function RunnerCard({
           <Badge tone={reachable ? "ok" : "neutral"}>
             {reachable ? `${(logs?.lines ?? []).length} lines · ${(fibers?.fibers ?? []).length} fibers` : "reporter not reachable"}
           </Badge>
-          <span className="text-kumo-subtle">{open ? "▾" : "▸"}</span>
+          {open ? <CaretDown className="h-3 w-3" /> : <CaretRight className="h-3 w-3" />}
         </span>
       </button>
 

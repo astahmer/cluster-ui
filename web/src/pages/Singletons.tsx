@@ -4,7 +4,7 @@ import { api, type RunnerReport } from "../api.ts"
 import { RunnerRuntimePanel } from "../components/runner-state.tsx"
 import { Badge, Table, TBody, TD, TH, THead, TR } from "../components/ui.tsx"
 import { ErrorNote, PageHeader, useRoute, useLive } from "../shell.tsx"
-import { SkeletonTable } from "../components/pieces.tsx"
+import { SkeletonTable, useHashParam } from "../components/pieces.tsx"
 import { Empty, Tabs, Tooltip } from "../kumo"
 import { FilterBar, presenceFacet, useFacets, type FacetDef } from "../components/filters/index.tsx"
 /**
@@ -14,7 +14,10 @@ import { FilterBar, presenceFacet, useFacets, type FacetDef } from "../component
  * reporters show as a muted per-runner error rather than failing the whole view.
  */
 export function SingletonsPage() {
-  const [tab, setTab] = React.useState("state")
+  // tab lives in the URL so #/singletons?tab=logs deep-links to fibers/logs
+  const [tabParam, setTabParam] = useHashParam("tab")
+  const tab = tabParam === "logs" ? "logs" : "state"
+  const setTab = (t: string) => setTabParam(t === "state" ? "" : t)
   const [runners, setRunners] = React.useState<RunnerReport[]>([])
   const { loading, error, refresh } = useLive(async () => setRunners((await api.singletons()).runners))
   // cluster param flows through to the runtime fan-out routes too
@@ -45,11 +48,13 @@ export function SingletonsPage() {
         className="mb-3 w-fit"
         tabs={[
           { value: "state", label: "State" },
-          { value: "runtime", label: "Runtime" }
+          { value: "logs", label: "Logs & fibers" }
         ]}
         value={tab}
         onValueChange={setTab}
       />
+
+      <FilterBar defs={facetDefs} rows={runners} facets={facets} />
 
       <div className="mb-3 flex flex-wrap items-center gap-2 text-[12px] text-kumo-subtle">
         <Badge tone={reporting.length > 0 ? "ok" : "neutral"}>
@@ -116,7 +121,7 @@ export function SingletonsPage() {
         package in your runner app to make it visible here.
       </p>
 
-      <div className="mt-4" data-tab="runtime" hidden={tab !== "runtime"}>
+      <div className="mt-4" data-tab="logs" hidden={tab !== "logs"}>
         <RunnerRuntimePanel cluster={cluster} />
       </div>
     </div>

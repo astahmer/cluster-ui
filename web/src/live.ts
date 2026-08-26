@@ -1,5 +1,5 @@
 import * as React from "react"
-import { eventsUrl } from "./api.ts"
+import { eventsUrl, getCluster, onClusterChange } from "./api.ts"
 import { markFresh } from "./freshness.ts"
 
 /**
@@ -88,6 +88,32 @@ function connect() {
     startFallback()
   }
 }
+
+/** Close the SSE stream (used when the selected cluster changes). */
+function disconnect() {
+  if (source !== null) {
+    source.close()
+    source = null
+  }
+}
+
+// the stream describes one cluster — reopen it when the selection changes so
+// wakeup cadence and bus-down signal reflect the right cluster (UX audit #2)
+let sseCluster: string | null = getCluster()
+onClusterChange((next) => {
+  if (next === sseCluster) return
+  sseCluster = next
+  // if SSE is healthy, bounce it; if we're on fallback polling, polling is
+  // cluster-agnostic (pages fetch with their own ?cluster=) — just clear the
+  // failure state so SSE gets another chance on the next subscribe cycle
+  if (source !== null) {
+    disconnect()
+    setSseFailed(false)
+    connect()
+  } else {
+    setSseFailed(false)
+  }
+})
 
 export function isPaused(): boolean {
   return paused

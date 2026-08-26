@@ -2,7 +2,7 @@ import * as React from "react"
 import { api, type MetricPoint, type Overview } from "../api.ts"
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui.tsx"
 import { Sparkline } from "../components/sparkline.tsx"
-import { ActivityDot, SkeletonCards, SkeletonTable, StatCard } from "../components/pieces.tsx"
+import { SkeletonCards, SkeletonTable, StatCard } from "../components/pieces.tsx"
 import { Badge } from "../components/ui.tsx"
 import { ErrorNote, PageHeader, useLive } from "../shell.tsx"
 import { Banner, Tabs } from "../kumo"
@@ -77,7 +77,8 @@ export function OverviewPage() {
         </Banner>
       )}
 
-      {/* 5 cards: 3-col middle tier keeps the last card from orphaning half-width (UX review P2-1) */}
+      {/* 5 cards: 3-col middle tier keeps the last card from orphaning half-width;
+          below sm the 5th card spans both columns instead of orphaning (UX audit #2) */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         <StatCard label="Pending" value={m.pending} sub="waiting to be delivered" href="#/messages?status=pending" />
         <StatCard label="In-flight" value={m.inflight} sub="read in the last 5 min" href="#/messages?status=inflight" />
@@ -89,7 +90,9 @@ export function OverviewPage() {
           tone={m.failed > 0 ? "err" : undefined}
           href="#/messages?failed=true"
         />
-        <StatCard label="Done" value={m.done} sub="processed messages" href="#/messages?status=done" />
+        <div className="col-span-2 sm:col-span-1">
+          <StatCard label="Done" value={m.done} sub="processed messages" href="#/messages?status=done" />
+        </div>
       </div>
 
       <Card className="mt-3">
@@ -143,10 +146,16 @@ export function OverviewPage() {
             <CardTitle>Busiest entities</CardTitle>
           </CardHeader>
           <CardContent className="space-y-1.5">
+            {data!.topEntities.length === 0 && (
+              <div className="text-[13px] text-kumo-subtle">no activity yet</div>
+            )}
             {data!.topEntities.map((e) => (
-              <div key={e.entityType} className="flex items-center justify-between text-[13px]">
-                <code className="truncate text-kumo-default">{e.entityType}</code>
-                <span className="flex items-center gap-2 tabular-nums text-kumo-subtle">
+              <div
+                key={e.entityType}
+                className="flex min-w-0 items-center justify-between gap-2 text-[13px]"
+              >
+                <code className="min-w-0 truncate text-kumo-default">{e.entityType}</code>
+                <span className="flex shrink-0 items-center gap-2 tabular-nums text-kumo-subtle">
                   {e.active > 0 && <Badge tone="warn">{e.active} active</Badge>}
                   {e.total} msgs
                 </span>
@@ -183,12 +192,36 @@ export function OverviewPage() {
             <CardTitle>Cluster time</CardTitle>
           </CardHeader>
           <CardContent>
-            <ActivityDot at={data!.serverTime} />
-            <p className="mt-2 text-[12px] leading-5 text-kumo-subtle">
-              Message ids are snowflakes — their embedded timestamp powers the “last activity”
-              views. Status windows mirror the cluster: a message is in-flight for 5 minutes after
-              being read.
-            </p>
+            {/* rel-time of a polled server timestamp is always ~"0s ago" and tells
+                the user nothing (UX audit #2) — surface actual clock skew instead */}
+            {(() => {
+              const skewSec = Math.round((data!.serverTime - Date.now()) / 1000)
+              return (
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span
+                      className="text-xl font-semibold tabular-nums text-kumo-default"
+                      title={`server reports ${new Date(data!.serverTime).toLocaleString()}`}
+                    >
+                      {new Date(data!.serverTime).toLocaleTimeString()}
+                    </span>
+                    {Math.abs(skewSec) > 2 ? (
+                      <Badge tone="warn">
+                        server clock {skewSec > 0 ? "+" : "−"}
+                        {Math.abs(skewSec)}s vs this browser
+                      </Badge>
+                    ) : (
+                      <Badge tone="ok">clocks in sync</Badge>
+                    )}
+                  </div>
+                  <p className="text-[12px] leading-5 text-kumo-subtle">
+                    Message ids are snowflakes — their embedded timestamp powers the “last activity”
+                    views. Status windows mirror the cluster: a message is in-flight for 5 minutes after
+                    being read.
+                  </p>
+                </div>
+              )
+            })()}
           </CardContent>
         </Card>
       </div>
@@ -247,12 +280,11 @@ function FailureRate({ history }: { history: MetricPoint[] }) {
 }
 
 function ShardBar({ assigned, total }: { assigned: number; total: number }) {
+  // zero-guard like Runners' LoadBar — an empty cluster must not render NaN% width
+  const pct = total > 0 ? (assigned / total) * 100 : 0
   return (
     <div className="h-3 w-full overflow-hidden rounded-full border border-kumo-line bg-kumo-canvas">
-      <div
-        className="h-full bg-kumo-brand transition-all"
-        style={{ width: `${(assigned / total) * 100}%` }}
-      />
+      <div className="h-full bg-kumo-brand transition-all" style={{ width: `${pct}%` }} />
     </div>
   )
 }

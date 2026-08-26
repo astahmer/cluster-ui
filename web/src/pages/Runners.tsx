@@ -52,14 +52,7 @@ export function RunnersPage() {
           <TBody>
             {sort.sorted(rows).map((r) => (
               <TR key={r.address}>
-                <TD className="font-medium">
-                  {r.address}
-                  {r.stale && (
-                    <Badge tone="warn" className="ml-2">
-                      stale
-                    </Badge>
-                  )}
-                </TD>
+                <TD className="font-medium">{r.address}</TD>
                 <TD className="text-kumo-subtle">
                   {r.host ?? "—"}
                   {r.port ? `:${r.port}` : ""}
@@ -76,8 +69,10 @@ export function RunnersPage() {
                 <TD className="tabular-nums text-kumo-subtle">v{r.version ?? "?"}</TD>
                 <TD className="text-right tabular-nums">{r.shards}</TD>
                 <TD>
+                  {/* single staleness treatment (UX audit #2): the address cell used
+                      to ALSO show a "stale" badge while this column said "no shards" */}
                   {r.stale ?
-                    <Badge tone="warn">no shards</Badge> :
+                    <Badge tone="warn">stale</Badge> :
                     <Badge tone="ok">active</Badge>}
                 </TD>
                 <TD>
