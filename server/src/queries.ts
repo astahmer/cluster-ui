@@ -74,6 +74,12 @@ export interface TraceSummary {
   lastAt: number
 }
 
+/** Paged trace listing (UX P1-15): rows + total for the pager. */
+export interface TraceList {
+  rows: TraceSummary[]
+  total: number
+}
+
 interface RawMessageRow {
   readonly id: number | bigint
   readonly message_id: string | null
@@ -585,8 +591,23 @@ export function makeRepo(db: Database.Database, prefix: string = config.prefix) 
     return { run, activities }
   }
 
-  /** Recent traces: non-null trace_ids grouped, newest message first. */
-  const traces = (limit = 50): TraceSummary[] => {
+  /** Recent traces: non-null trace_ids grouped, newest first. Optional id-substring search + offset paging (UX P1-15). */
+  const traces = (opts: { limit?: number; offset?: number; q?: string } = {}): TraceList => {
+    const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200)
+    const offset = Math.max(opts.offset ?? 0, 0)
+    const q = opts.q?.trim() ?? ""
+    // escape LIKE wildcards in the user-supplied substring
+    const pattern = q === "" ? null : `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`
+    const where =
+      q === ""
+        ? "WHERE m.trace_id IS NOT NULL AND m.trace_id != ''"
+        : "WHERE m.trace_id IS NOT NULL AND m.trace_id != '' AND m.trace_id LIKE ? ESCAPE '\\'"
+    const searchParams: ReadonlyArray<string> = pattern === null ? [] : [pattern]
+
+    const totalRow = db
+      .prepare(`SELECT COUNT(DISTINCT m.trace_id) as total FROM ${t.messages} m ${where}`)
+      .get(...searchParams) as { total: number | bigint } | undefined
+
     const rows = db
       .prepare(
         `SELECT m.trace_id as traceId, COUNT(*) as count,
@@ -594,12 +615,12 @@ export function makeRepo(db: Database.Database, prefix: string = config.prefix) 
            GROUP_CONCAT(DISTINCT m.kind) as kinds,
            GROUP_CONCAT(DISTINCT m.entity_type) as services
          FROM ${t.messages} m
-         WHERE m.trace_id IS NOT NULL AND m.trace_id != ''
+         ${where}
          GROUP BY m.trace_id
          ORDER BY MAX(m.id) DESC
-         LIMIT ?`
+         LIMIT ? OFFSET ?`
       )
-      .all(Math.min(Math.max(limit, 1), 200)) as ReadonlyArray<{
+      .all(...searchParams, limit, offset) as ReadonlyArray<{
       traceId: string
       count: number | bigint
       firstId: number | bigint
@@ -607,23 +628,26 @@ export function makeRepo(db: Database.Database, prefix: string = config.prefix) 
       kinds: string | null
       services: string | null
     }>
-    return rows.map((r) => ({
-      traceId: r.traceId,
-      count: Number(r.count),
-      kinds:
-        r.kinds === null ? [] :
-        String(r.kinds)
-          .split(",")
-          .filter((k) => k !== "")
-          .map((k) => kindName(Number(k))),
-      services:
-        r.services === null ? [] :
-        String(r.services)
-          .split(",")
-          .filter((s) => s !== ""),
-      firstAt: decodeSnowflake(String(r.firstId)).createdAt,
-      lastAt: decodeSnowflake(String(r.lastId)).createdAt
-    }))
+    return {
+      rows: rows.map((r) => ({
+        traceId: r.traceId,
+        count: Number(r.count),
+        kinds:
+          r.kinds === null ? [] :
+          String(r.kinds)
+            .split(",")
+            .filter((k) => k !== "")
+            .map((k) => kindName(Number(k))),
+        services:
+          r.services === null ? [] :
+          String(r.services)
+            .split(",")
+            .filter((s) => s !== ""),
+        firstAt: decodeSnowflake(String(r.firstId)).createdAt,
+        lastAt: decodeSnowflake(String(r.lastId)).createdAt
+      })),
+      total: Number(totalRow?.total ?? 0)
+    }
   }
 
   /** All messages sharing a trace id, oldest first (same view shape as listMessages). */

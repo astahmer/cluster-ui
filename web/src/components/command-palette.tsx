@@ -22,6 +22,25 @@ export interface PaletteItem {
   run: () => void
 }
 
+/** Debounced, abortable domain-object source for the palette (P1-11). */
+export interface AsyncPaletteProvider {
+  key: string
+  fetch: (query: string, signal: AbortSignal) => Promise<PaletteItem[]>
+}
+
+/* short-lived provider result cache so backspacing doesn't refetch spam */
+const providerCache = new Map<string, { at: number; items: PaletteItem[] }>()
+const PROVIDER_CACHE_TTL_MS = 30_000
+function cacheGet(providerKey: string, query: string): PaletteItem[] | null {
+  const hit = providerCache.get(`${providerKey}:${query}`)
+  if (!hit) return null
+  if (Date.now() - hit.at > PROVIDER_CACHE_TTL_MS) {
+    providerCache.delete(`${providerKey}:${query}`)
+    return null
+  }
+  return hit.items
+}
+
 /**
  * Fuzzy subsequence scoring (P1-11): all query chars must appear in order in
  * the haystack; score rewards contiguous runs and word-start hits. Returns -1
@@ -51,7 +70,8 @@ export function CommandPalette({
   open,
   onClose,
   staticItems,
-  dynamicItems = (): PaletteItem[] => []
+  dynamicItems = (): PaletteItem[] => [],
+  asyncProviders = []
 }: {
   open: boolean
   onClose: () => void
@@ -59,15 +79,18 @@ export function CommandPalette({
   staticItems: PaletteItem[]
   /** context-dependent commands recomputed from the typed query (deep links) */
   dynamicItems?: (query: string) => PaletteItem[]
+  /** debounced domain-object providers (entities, workflows, …) run while open (P1-11) */
+  asyncProviders?: AsyncPaletteProvider[]
 }) {
   const [query, setQuery] = React.useState("")
   const [index, setIndex] = React.useState(0)
   const inputRef = React.useRef<HTMLInputElement | null>(null)
+  const [asyncItems, setAsyncItems] = React.useState<PaletteItem[]>([])
 
   const all = React.useMemo(
-    () => [...staticItems, ...(query.trim() ? dynamicItems(query.trim()) : [])],
+    () => [...staticItems, ...(query.trim() ? dynamicItems(query.trim()) : []), ...asyncItems],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [staticItems, dynamicItems, query]
+    [staticItems, dynamicItems, asyncItems, query]
   )
   const filtered = React.useMemo(() => {
     const q = query.trim()
@@ -97,8 +120,49 @@ export function CommandPalette({
       setIndex(0)
       // focus after the dialog mounts
       setTimeout(() => inputRef.current?.focus(), 30)
+    } else {
+      setAsyncItems([])
     }
   }, [open])
+
+  // P1-11: debounced + abortable async providers; only fetches while open.
+  // The api layer has no signal support, so aborting is enforced by dropping
+  // results when the effect's controller is already aborted.
+  React.useEffect(() => {
+    if (!open) return
+    const q = query.trim()
+    if (q.length < 2 || asyncProviders.length === 0) {
+      setAsyncItems([])
+      return
+    }
+    let cancelled = false
+    const controller = new AbortController()
+    const timer = setTimeout(() => {
+      Promise.all(
+        asyncProviders.map(async (provider) => {
+          const cached = cacheGet(provider.key, q)
+          if (cached) return cached
+          try {
+            const items = await provider.fetch(q, controller.signal)
+            const capped = items.slice(0, 5)
+            providerCache.set(`${provider.key}:${q}`, { at: Date.now(), items: capped })
+            return capped
+          } catch {
+            return []
+          }
+        })
+      )
+        .then((groups) => {
+          if (!cancelled && !controller.signal.aborted) setAsyncItems(groups.flat())
+        })
+        .catch(() => {})
+    }, 200)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+      controller.abort()
+    }
+  }, [query, open, asyncProviders])
 
   const run = (item: PaletteItem) => {
     onClose()

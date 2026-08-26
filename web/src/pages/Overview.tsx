@@ -10,7 +10,8 @@ import { Banner, Tabs } from "../kumo"
 const RANGES = [
   { label: "1h", ms: 3_600_000 },
   { label: "6h", ms: 6 * 3_600_000 },
-  { label: "24h", ms: 24 * 3_600_000 }
+  { label: "24h", ms: 24 * 3_600_000 },
+  { label: "7d", ms: 7 * 24 * 3_600_000 }
 ]
 
 export function OverviewPage() {

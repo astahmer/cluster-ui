@@ -8,10 +8,10 @@ import { SkeletonTable } from "../components/pieces.tsx"
 import { Empty, Tabs, Tooltip } from "../kumo"
 import { FilterBar, presenceFacet, useFacets, type FacetDef } from "../components/filters/index.tsx"
 /**
- * Singleton visibility page. Runner-resident state (singletons, in-memory
- * entities) is only visible for runners that mount the optional
- * @effect/cluster-ui-reporter package; unreachable reporters show as a muted
- * per-runner error rather than failing the whole view.
+ * Runtime visibility page (display name; route stays /singletons). Runner-
+ * resident state (singletons, in-memory entities) is only visible for runners
+ * that mount the optional @effect/cluster-ui-reporter package; unreachable
+ * reporters show as a muted per-runner error rather than failing the whole view.
  */
 export function SingletonsPage() {
   const [tab, setTab] = React.useState("state")
@@ -34,8 +34,8 @@ export function SingletonsPage() {
   return (
     <div>
       <PageHeader
-        title="Singletons"
-        subtitle="runner-resident singleton entities and in-memory entity counts"
+        title="Runtime"
+        subtitle="runners, fibers & singleton leases"
       />
       <ErrorNote error={error} onRetry={refresh} />
 

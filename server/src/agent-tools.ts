@@ -95,7 +95,7 @@ export const agentTools: ReadonlyArray<AgentTool> = [
     description: "Recent trace ids with span counts and kinds (newest first).",
     parameters: z.object({ limit: z.number().int().positive().max(200).optional() }),
     readOnly: true,
-    execute: async (repo, args) => repo.traces((args as { limit?: number }).limit ?? 25)
+    execute: async (repo, args) => repo.traces({ limit: (args as { limit?: number }).limit ?? 25 })
   },
   {
     name: "list_singletons",

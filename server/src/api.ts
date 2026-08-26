@@ -662,7 +662,13 @@ export const api = HttpRouter.concat(HttpRouter.concat(baseRouter, redisRouter),
     Effect.flatMap(req, (p) => {
       const repo = repoFor(p.cluster)
       if (!repo) return Effect.succeed(notFound("cluster"))
-      return jsonMaybeAsync(repo.traces(p.limit ? intParam(p.limit) ?? 50 : 50))
+      return jsonMaybeAsync(
+        repo.traces({
+          limit: p.limit ? intParam(p.limit) ?? 50 : 50,
+          offset: intParam(p.offset) ?? 0,
+          q: typeof p.q === "string" && p.q !== "" ? p.q : undefined
+        })
+      )
     })
   ),
 

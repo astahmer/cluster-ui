@@ -332,6 +332,12 @@ export interface TraceSummary {
   lastAt: number
 }
 
+/** Paged trace listing (UX P1-15). */
+export interface TraceList {
+  rows: TraceSummary[]
+  total: number
+}
+
 export interface RunnerReport {
   address: string
   state?: {
@@ -395,7 +401,18 @@ export const api = {
       )}`
     ),
   crons: () => get<CronJob[]>("/api/crons"),
-  traces: () => get<TraceSummary[]>("/api/traces"),
+  traces: (q?: { limit?: number; offset?: number; search?: string; cluster?: string }) =>
+    get<TraceList>(
+      "/api/traces?" +
+        new URLSearchParams(
+          Object.entries({
+            limit: q?.limit,
+            offset: q?.offset,
+            q: q?.search,
+            cluster: q?.cluster
+          }).filter(([, v]) => v !== undefined && v !== "") as Array<[string, string]>
+        ).toString()
+    ),
   queues: (q?: { cluster?: string }) =>
     get<QueueInfo[]>("/api/queues" + (q?.cluster ? `?cluster=${encodeURIComponent(q.cluster)}` : "")),
   pauseQueue: (queue: string, cluster?: string) =>

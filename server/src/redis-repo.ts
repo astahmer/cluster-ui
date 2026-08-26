@@ -506,7 +506,8 @@ export function makeRedisRepo(url: string): import("./queries.ts").Repo {
     workflows: () => allSync([]),
     workflowRuns: (_name: string) => allSync([]),
     workflowRun: (_name: string, _executionId: string) => allSync(null),
-    traces: (_limit?: number) => allSync([] as TraceSummary[]),
+    traces: (_opts?: { limit?: number; offset?: number; q?: string }) =>
+      allSync({ rows: [] as TraceSummary[], total: 0 }),
     trace: (_traceId: string) => allSync([]),
     queues: () => queues(),
     jobTree: (id: string) => jobTree(id),

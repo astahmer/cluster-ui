@@ -5,7 +5,7 @@ import { toast } from "./toast.tsx"
 import * as live from "./live.ts"
 import { useFreshness } from "./freshness.ts"
 import { inputVariants } from "./kumo"
-import { CommandPalette, type PaletteItem } from "./components/command-palette.tsx"
+import { CommandPalette, type AsyncPaletteProvider, type PaletteItem } from "./components/command-palette.tsx"
 import { Badge } from "./components/ui.tsx"
 import { cn } from "./components/ui.tsx"
 
@@ -59,6 +59,14 @@ export function useCluster(): string | null {
     }
   }, [])
   return cluster
+}
+
+/**
+ * Provider-side narrowing for palette async sources; final fuzzy ranking
+ * happens inside the palette.
+ */
+function fuzzyIncludes(haystack: string, needle: string): boolean {
+  return haystack.toLowerCase().includes(needle.trim().toLowerCase())
 }
 
 /** Set a single query param on the current hash path without navigating. */
@@ -147,7 +155,7 @@ const NAV = [
   { to: "/workflows", label: "Workflows", icon: FlowArrow },
   { to: "/crons", label: "Crons", icon: ClockCounterClockwise },
   { to: "/traces", label: "Traces", icon: Stack },
-  { to: "/singletons", label: "Singletons", icon: CirclesThree },
+  { to: "/singletons", label: "Runtime", icon: CirclesThree },
   { to: "/messages", label: "Messages", icon: ListDashes },
   { to: "/agent", label: "AI Chat", icon: Sparkle },
   { to: "/mcp", label: "MCP", icon: Plugs }
@@ -421,6 +429,46 @@ export function Shell({ route, children }: { route: string; children: React.Reac
     []
   )
 
+  // P1-11: domain-object providers — entities and workflows, debounced +
+  // cached inside the palette, fetched only while it is open
+  const asyncProviders = React.useMemo<AsyncPaletteProvider[]>(
+    () => [
+      {
+        key: "entities",
+        fetch: async (q) => {
+          const all = await api.entities()
+          return all
+            .filter((e) => fuzzyIncludes(e.entityType, q))
+            .slice(0, 5)
+            .map((e) => ({
+              key: `entity-${e.entityType}`,
+              label: `Open entity ${e.entityType}`,
+              subtitle: `${e.entities} instance${e.entities === 1 ? "" : "s"} · ${e.messages} messages`,
+              keywords: "entity instances messages",
+              run: () => navigate(`/entities/${encodeURIComponent(e.entityType)}`)
+            }))
+        }
+      },
+      {
+        key: "workflows",
+        fetch: async (q) => {
+          const all = await api.workflows()
+          return all
+            .filter((w) => fuzzyIncludes(w.name, q))
+            .slice(0, 5)
+            .map((w) => ({
+              key: `workflow-${w.name}`,
+              label: `Open workflow ${w.name}`,
+              subtitle: `${w.runs} runs${w.failedRuns ? ` · ${w.failedRuns} failed` : ""}`,
+              keywords: "workflow executions",
+              run: () => navigate(`/workflows/${encodeURIComponent(w.name)}`)
+            }))
+        }
+      }
+    ],
+    []
+  )
+
   // close the mobile drawer whenever the route changes
   React.useEffect(() => {
     setNavOpen(false)
@@ -479,6 +527,7 @@ export function Shell({ route, children }: { route: string; children: React.Reac
       onClose={() => setPaletteOpen(false)}
       staticItems={paletteItems}
       dynamicItems={dynamicItems}
+      asyncProviders={asyncProviders}
     />
     </>
   )

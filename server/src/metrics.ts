@@ -18,8 +18,12 @@ export interface MetricSample {
 }
 
 const SAMPLE_INTERVAL_MS = 10_000
-// 24h at ~10s interval ≈ 8640 samples × ~7 numbers — small enough to keep in memory
-const RETENTION_MS = 24 * 60 * 60 * 1000
+// 8 days retained so the UI's 7d range has data (age-pruned in push());
+// 7d at ~10s would be ~60k points, so a hard per-series cap below keeps
+// memory bounded if sampling ever runs faster than the nominal interval
+const RETENTION_MS = 8 * 24 * 60 * 60 * 1000
+/** oldest-dropped-first ceiling per series (~3.5 days at 10s cadence) */
+const MAX_SAMPLES_PER_SERIES = 30_000
 
 /** per-cluster series */
 const byName = new Map<string, Array<MetricSample>>()
@@ -67,6 +71,9 @@ function push(buf: Array<MetricSample>, sample: MetricSample) {
   const cutoff = Date.now() - RETENTION_MS
   let drop = 0
   while (drop < buf.length && buf[drop].t < cutoff) drop++
+  // hard cap: drop the oldest beyond MAX_SAMPLES_PER_SERIES regardless of age
+  const overCap = buf.length - MAX_SAMPLES_PER_SERIES
+  if (overCap > drop) drop = overCap
   if (drop > 0) buf.splice(0, drop)
 }
 

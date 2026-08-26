@@ -4,7 +4,7 @@ import { Badge } from "./ui.tsx"
 import { useLive } from "../shell.tsx"
 
 /**
- * Runtime panel for the Singletons page — per reporting-runner fiber snapshots
+ * Runtime panel for the Runtime (singletons) page — per reporting-runner fiber snapshots
  * and recent log lines (Reporter v2 providers). Runners whose reporter is
  * unreachable show the same muted state as the State tab.
  */

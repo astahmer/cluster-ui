@@ -2,7 +2,7 @@ import * as React from "react"
 import { Stack } from "@phosphor-icons/react"
 import { api, type Message, type TraceSummary } from "../api.ts"
 import { Badge, Table, TBody, TD, TH, THead, TR } from "../components/ui.tsx"
-import { DetailPanel, SkeletonTable, StatusBadge, rowInteractions } from "../components/pieces.tsx"
+import { DetailPanel, SkeletonTable, StatusBadge, rowInteractions, Pager } from "../components/pieces.tsx"
 import { SpanWaterfall, type TimelineSpan } from "../components/timeline.tsx"
 import { ErrorNote, PageHeader, useEscToClose, useLive } from "../shell.tsx"
 import { Empty } from "../kumo"
@@ -17,24 +17,58 @@ import { fmtTime } from "../format.ts"
  */
 
 export function TracesPage() {
-  const [traces, setTraces] = React.useState<TraceSummary[]>([])
+  const [rows, setRows] = React.useState<TraceSummary[] | null>(null)
+  const [total, setTotal] = React.useState(0)
+  // P1-15: trace-id substring search + offset paging
+  const [search, setSearch] = React.useState("")
+  const [debouncedSearch, setDebouncedSearch] = React.useState("")
+  const [page, setPage] = React.useState(1)
+  const pageSize = 50
   const [openTraceId, setOpenTraceId] = React.useState<string | null>(null)
-  const { loading, error, refresh } = useLive(async () => setTraces(await api.traces()))
+
+  React.useEffect(() => {
+    const id = setTimeout(() => {
+      setDebouncedSearch(search)
+      setPage(1)
+    }, 250)
+    return () => clearTimeout(id)
+  }, [search])
+
+  const { loading, error, refresh } = useLive(async () => {
+    const res = await api.traces({
+      limit: pageSize,
+      offset: (page - 1) * pageSize,
+      search: debouncedSearch || undefined
+    })
+    setRows(res.rows)
+    setTotal(res.total)
+    // refetch when paging or searching, not just on the poll interval
+  }, [page, debouncedSearch])
 
   useEscToClose(() => setOpenTraceId(null))
 
-  if (loading && traces.length === 0) return <SkeletonTable />
+  if (loading && rows === null) return <SkeletonTable />
+  const traces = rows ?? []
+  const from = total === 0 ? 0 : (page - 1) * pageSize + 1
+  const to = Math.min(page * pageSize, total)
 
   return (
     <div>
       <PageHeader title="Traces" subtitle="messages grouped by trace id — newest first">
+        <input
+          aria-label="search traces"
+          placeholder="filter by trace id…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="w-56 rounded-md border border-kumo-line bg-kumo-canvas px-2 py-1 text-[12px] text-kumo-default outline-none placeholder:text-kumo-subtle focus:border-kumo-brand"
+        />
         <span className="text-[12px] text-kumo-subtle">click a trace for its waterfall</span>
       </PageHeader>
       <ErrorNote error={error} onRetry={refresh} />
-      {/* server caps the listing at 50 — say so instead of silently truncating (P1-15) */}
-      {traces.length > 0 && (
+      {/* accurate window driven by server total instead of a silent cap (P1-15) */}
+      {total > 0 && (
         <p className="mb-2 text-[12px] text-kumo-subtle">
-          showing latest {traces.length} traces{traces.length === 50 ? " (server cap)" : ""}
+          {total} trace{total === 1 ? "" : "s"} · showing {from}–{to}
         </p>
       )}
 
@@ -90,11 +124,17 @@ export function TracesPage() {
         {traces.length === 0 && (
           <Empty
             icon={<Stack className="h-8 w-8 text-kumo-subtle" />}
-            title="No traces yet"
-            description="Messages carrying a trace_id appear here grouped into traces."
+            title={debouncedSearch !== "" ? "No traces match" : "No traces yet"}
+            description={
+              debouncedSearch !== "" ?
+                `Nothing carries a trace_id containing "${debouncedSearch}".` :
+                "Messages carrying a trace_id appear here grouped into traces."
+            }
           />
         )}
       </div>
+
+      <Pager page={page} total={total} pageSize={pageSize} onChange={setPage} />
 
       <DetailPanel
         open={openTraceId !== null}

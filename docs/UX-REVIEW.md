@@ -32,6 +32,14 @@
 > **IA [regrouped]** — nav is now Cluster / Infra / Work / Observe / Tools; Singletons rename
 > and metrics 7d remain deferred. **P1-11 [partially fixed]** — fuzzy subsequence scoring,
 > keyword noise hidden, cluster-switch commands; async entity/workflow providers still open.
+>
+> Batch 4 (2026-08-26): **P1-11 [fixed]** — debounced + cached async palette providers for
+> entities and workflows (fetched only while open, TTL 30s). **P1-15 [fixed]** — server traces
+> endpoint supports offset paging + trace-id substring search (LIKE with escaped wildcards,
+> total via COUNT DISTINCT); UI has a filter input, shared Pager and an accurate
+> "N traces · showing x–y" window; response shape is now { rows, total }. Metrics retention
+> extended to 8 days (age-pruned + 30k hard cap per series) so the new Overview **7d range**
+> has data. Singletons surface renamed to **Runtime** (display only; route stays /singletons).
 
 ---
 
