@@ -43,8 +43,10 @@ pnpm dev:server   # API only, node --watch on :8787 (native TS, no tsx)
 pnpm dev:web      # vite dev server (proxies /api to :8787)
 ```
 
-Docs: [`docs/ROADMAP.md`](docs/ROADMAP.md) (feature roadmap) and
-[`docs/UX-REVIEW.md`](docs/UX-REVIEW.md) (UX/layout audit with fix status).
+Docs: [`docs/ROADMAP.md`](docs/ROADMAP.md) (feature roadmap),
+[`docs/UX-REVIEW.md`](docs/UX-REVIEW.md) (UX audit #1, all items fixed),
+[`docs/UX-AUDIT-2.md`](docs/UX-AUDIT-2.md) (fresh audit #2, 2026-08-26), and
+[`docs/COMPETITIVE.md`](docs/COMPETITIVE.md) (competitor landscape + feature gaps).
 
 ### Local redis demo
 
