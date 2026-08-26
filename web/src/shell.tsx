@@ -1,5 +1,5 @@
 import * as React from "react"
-import { SquaresFour, Cpu, GridFour, Cube, ClockCounterClockwise, FlowArrow, ListDashes, CirclesThree, List, Stack, Sparkle, Plugs, MagnifyingGlass, QueueIcon, Moon, Sun, Wrench } from "@phosphor-icons/react"
+import { SquaresFour, Cpu, GridFour, Cube, ClockCounterClockwise, FlowArrow, ListDashes, CirclesThree, List, Stack, Sparkle, Plugs, MagnifyingGlass, QueueIcon, Moon, Sun, Wrench, BookmarkSimple } from "@phosphor-icons/react"
 import { api, getCluster, onClusterChange, setCluster } from "./api.ts"
 import { useAppConfig } from "./config.ts"
 import { toast } from "./toast.tsx"
@@ -39,6 +39,9 @@ export function useRoute(): Route {
 }
 
 export function navigate(path: string) {
+  const query = path.includes("?") ? path.slice(path.indexOf("?") + 1) : ""
+  const cluster = new URLSearchParams(query).get("cluster")
+  if (cluster) setCluster(cluster)
   window.location.hash = path
 }
 
@@ -279,6 +282,21 @@ function TopBar({ base, onMenu, onOpenPalette }: { base: string; onMenu: () => v
     applyTheme(next)
   }
 
+  const saveCurrentView = () => {
+    const url = window.location.hash.slice(1) || "/overview"
+    const name = window.prompt("Name this view", "")?.trim().slice(0, 80)
+    if (!name) return
+    try {
+      const parsed = JSON.parse(localStorage.getItem("cluster_ui_saved_views") ?? "[]")
+      const views = Array.isArray(parsed) ? parsed : []
+      const next = [{ id: crypto.randomUUID(), name, url: url.slice(0, 2048), createdAt: Date.now() }, ...views.filter((v) => v?.url !== url)].slice(0, 100)
+      localStorage.setItem("cluster_ui_saved_views", JSON.stringify(next))
+      toast.success("View saved")
+    } catch {
+      toast.error("Could not save view")
+    }
+  }
+
   return (
     <div className="flex h-11 shrink-0 items-center justify-end gap-2 border-b border-kumo-line bg-kumo-base px-4">
       <button
@@ -345,6 +363,16 @@ function TopBar({ base, onMenu, onOpenPalette }: { base: string; onMenu: () => v
         aria-label={paused ? "resume auto-refresh" : "pause auto-refresh"}
       >
         <Badge tone={paused ? "warn" : "ok"}>{paused ? "paused" : "live"}</Badge>
+      </button>
+
+      <button
+        type="button"
+        onClick={saveCurrentView}
+        title="save current view"
+        aria-label="save current view"
+        className="grid h-7 w-7 cursor-pointer place-items-center rounded-md text-kumo-subtle hover:bg-kumo-tint hover:text-kumo-default"
+      >
+        <BookmarkSimple className="h-4 w-4" />
       </button>
 
       <button

@@ -606,17 +606,29 @@ export function makeRepo(db: Database.Database, prefix: string = config.prefix) 
   }
 
   /** Recent traces: non-null trace_ids grouped, newest first. Optional id-substring search + offset paging (UX P1-15). */
-  const traces = (opts: { limit?: number; offset?: number; q?: string } = {}): TraceList => {
+  const traces = (opts: { limit?: number; offset?: number; q?: string; createdAfter?: number; createdBefore?: number } = {}): TraceList => {
     const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200)
     const offset = Math.max(opts.offset ?? 0, 0)
     const q = opts.q?.trim() ?? ""
+    const createdAfter = opts.createdAfter
+    const createdBefore = opts.createdBefore
     // escape LIKE wildcards in the user-supplied substring
     const pattern = q === "" ? null : `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`
-    const where =
-      q === ""
-        ? "WHERE m.trace_id IS NOT NULL AND m.trace_id != ''"
-        : "WHERE m.trace_id IS NOT NULL AND m.trace_id != '' AND m.trace_id LIKE ? ESCAPE '\\'"
-    const searchParams: ReadonlyArray<string> = pattern === null ? [] : [pattern]
+    const clauses = ["m.trace_id IS NOT NULL AND m.trace_id != ''"]
+    const searchParams: Array<string | number> = []
+    if (pattern !== null) {
+      clauses.push("m.trace_id LIKE ? ESCAPE '\\'")
+      searchParams.push(pattern)
+    }
+    if (createdAfter !== undefined && Number.isFinite(createdAfter)) {
+      clauses.push("m.id >= ?")
+      searchParams.push(snowflakeFloor(createdAfter))
+    }
+    if (createdBefore !== undefined && Number.isFinite(createdBefore)) {
+      clauses.push("m.id <= ?")
+      searchParams.push(snowflakeCeil(createdBefore))
+    }
+    const where = `WHERE ${clauses.join(" AND ")}`
 
     const totalRow = db
       .prepare(`SELECT COUNT(DISTINCT m.trace_id) as total FROM ${t.messages} m ${where}`)

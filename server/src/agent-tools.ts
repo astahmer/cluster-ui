@@ -1,7 +1,7 @@
 import { z } from "zod"
 import { ActionError, assertWritable, deleteMessage, interruptMessage, resetActivity, retryMessage } from "./actions.ts"
 import { config } from "./config.ts"
-import { requireOperator } from "./ops.ts"
+import { actor, recordAudit, requireOperator, role } from "./ops.ts"
 import type { Repo } from "./queries.ts"
 import { queryRunnerState } from "./singletons.ts"
 
@@ -147,25 +147,32 @@ async function runWrite(repo: Repo, action: WriteAction, messageId: string): Pro
   ).actions
   assertWritable(config.readonly)
   requireOperator()
-  if (redisActions && (action === "retry" || action === "delete")) {
+  let result: { ok: true }
+  if (redisActions) {
     const fn = redisActions[action]
     if (!fn) throw new ActionError(`${action} not supported for this cluster`, 400)
     try {
-      return await fn(messageId)
+      result = await fn(messageId)
     } catch (e) {
       throw e instanceof ActionError ? e : new ActionError(String(e))
     }
+  } else {
+    switch (action) {
+      case "retry":
+        result = retryMessage(repo.db, repo.prefix, messageId)
+        break
+      case "interrupt":
+        result = interruptMessage(repo.db, repo.prefix, messageId)
+        break
+      case "reset-activity":
+        result = resetActivity(repo.db, repo.prefix, messageId)
+        break
+      case "delete":
+        result = deleteMessage(repo.db, repo.prefix, messageId)
+        break
+    }
   }
-  switch (action) {
-    case "retry":
-      return retryMessage(repo.db, repo.prefix, messageId)
-    case "interrupt":
-      return interruptMessage(repo.db, repo.prefix, messageId)
-    case "reset-activity":
-      return resetActivity(repo.db, repo.prefix, messageId)
-    case "delete":
-      return deleteMessage(repo.db, repo.prefix, messageId)
-  }
+  return result
 }
 
 export function findAgentTool(name: string): AgentTool | undefined {
@@ -188,7 +195,8 @@ export function agentToolsJsonSchema(): Array<{
 export async function callAgentTool(
   repo: Repo,
   name: string,
-  args: unknown
+  args: unknown,
+  auditCluster = "selected"
 ): Promise<{ ok: true; result: unknown } | { ok: false; error: string; status?: number }> {
   const tool = findAgentTool(name)
   if (!tool) return { ok: false, error: `unknown tool: ${name}` }
@@ -198,6 +206,10 @@ export async function callAgentTool(
       return { ok: false, error: `invalid arguments: ${parsed.error.message}` }
     }
     const result = await tool.execute(repo, parsed.data)
+    if (!tool.readOnly) {
+      const target = parsed.data && typeof parsed.data === "object" && "id" in parsed.data ? String((parsed.data as { id: unknown }).id) : name
+      recordAudit({ actor, role, action: `agent:${name}`, cluster: auditCluster, target })
+    }
     return { ok: true, result }
   } catch (e) {
     return {

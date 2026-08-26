@@ -26,6 +26,11 @@ export interface SparklinePoint {
   v: number
 }
 
+export interface SparklineBrushRange {
+  from: number
+  to: number
+}
+
 const VIEW_W = 300
 const VIEW_H = 100
 /** headroom so the line never clips against the frame */
@@ -40,6 +45,8 @@ export function Sparkline({
   height = 48,
   formatValue = (v: number) => String(v),
   showLastLabel = true,
+  onBrush,
+  brushRange,
   className
 }: {
   points: ReadonlyArray<SparklinePoint>
@@ -48,13 +55,19 @@ export function Sparkline({
   height?: number
   formatValue?: (v: number) => string
   showLastLabel?: boolean
+  /** Called after a click-drag selects a time window. */
+  onBrush?: (range: SparklineBrushRange) => void
+  /** Controlled range rendered over the chart, in epoch milliseconds. */
+  brushRange?: SparklineBrushRange | null
   className?: string
 }) {
   const color = TONE_COLORS[tone]
   const values = points.map((p) => p.v)
   // P1-10: pointer-tracking crosshair — hover inspects t/v at any point
   const wrapRef = React.useRef<HTMLDivElement | null>(null)
+  const dragStartRef = React.useRef<number | null>(null)
   const [hoverIdx, setHoverIdx] = React.useState<number | null>(null)
+  const [dragSelection, setDragSelection] = React.useState<[number, number] | null>(null)
 
   if (values.length === 0) {
     return (
@@ -99,22 +112,63 @@ export function Sparkline({
     )
   }
 
-  const onPointerMove = (e: React.PointerEvent) => {
-    if (points.length < 2) return
+  const indexAtPointer = (e: React.PointerEvent) => {
     const rect = wrapRef.current?.getBoundingClientRect()
-    if (!rect || rect.width === 0) return
+    if (!rect || rect.width === 0 || points.length < 2) return null
     const frac = Math.min(Math.max((e.clientX - rect.left) / rect.width, 0), 1)
-    setHoverIdx(Math.round(frac * (points.length - 1)))
+    return Math.round(frac * (points.length - 1))
+  }
+  const onPointerMove = (e: React.PointerEvent) => {
+    const idx = indexAtPointer(e)
+    if (idx === null) return
+    setHoverIdx(idx)
+    const start = dragStartRef.current
+    if (start !== null) setDragSelection([Math.min(start, idx), Math.max(start, idx)])
+  }
+  const finishBrush = (e: React.PointerEvent) => {
+    const start = dragStartRef.current
+    const idx = indexAtPointer(e)
+    dragStartRef.current = null
+    if (idx === null || start === null || !onBrush) return
+    const left = Math.min(start, idx)
+    const right = Math.max(start, idx)
+    if (right === left) {
+      setDragSelection(null)
+      return
+    }
+    setDragSelection([left, right])
+    onBrush({ from: points[left].t, to: points[right].t })
   }
   const hovered = hoverIdx !== null ? points[hoverIdx] : null
+  const controlledSelection = brushRange && points.length > 1 ? [
+    points.findIndex((p) => p.t >= brushRange.from),
+    points.findLastIndex((p) => p.t <= brushRange.to)
+  ] as [number, number] : null
+  const selection = controlledSelection && controlledSelection[0] >= 0 && controlledSelection[1] >= controlledSelection[0]
+    ? controlledSelection
+    : dragSelection
 
   return (
     <div
       ref={wrapRef}
-      className={cn("relative", className)}
+      className={cn("relative", onBrush ? "cursor-crosshair select-none" : "", className)}
       style={{ height }}
+      role="img"
+      aria-label={`${formatValue(last.v)}${onBrush ? "; click and drag to select a time range" : ""}`}
+      tabIndex={onBrush ? 0 : undefined}
+      onPointerDown={(e) => {
+        if (!onBrush) return
+        const idx = indexAtPointer(e)
+        if (idx !== null) {
+          dragStartRef.current = idx
+          setDragSelection([idx, idx])
+          e.currentTarget.setPointerCapture?.(e.pointerId)
+        }
+      }}
       onPointerMove={onPointerMove}
-      onPointerLeave={() => setHoverIdx(null)}
+      onPointerUp={finishBrush}
+      onPointerCancel={() => { dragStartRef.current = null; setDragSelection(null) }}
+      onPointerLeave={() => { if (dragStartRef.current === null) setHoverIdx(null) }}
     >
       <svg
         viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
@@ -123,6 +177,19 @@ export function Sparkline({
         role="img"
         aria-label={formatValue(last.v)}
       >
+        {selection && selection[1] > selection[0] && (
+          <rect
+            x={x(selection[0])}
+            y={0}
+            width={Math.max(1, x(selection[1]) - x(selection[0]))}
+            height={VIEW_H}
+            fill={color}
+            fillOpacity={0.12}
+            stroke={color}
+            strokeOpacity={0.5}
+            strokeDasharray="3 2"
+          />
+        )}
         {areaPath && (
           <path d={areaPath} fill={color} fillOpacity={0.12} stroke="none" />
         )}

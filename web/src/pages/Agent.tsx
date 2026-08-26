@@ -10,8 +10,11 @@ import { createChatRuntime } from "../agent/runtime/create-chat-runtime.ts"
 import type { MessagePart, ToolInvocationMessagePart } from "../agent/protocol/parts.ts"
 import type { ChatMessage } from "../agent/protocol/messages.ts"
 import { Badge, Button, Input, Select } from "../components/ui.tsx"
-import { api, getCluster } from "../api.ts"
+import { api, getCluster, setCluster } from "../api.ts"
 import { ErrorNote, PageHeader, useCluster } from "../shell.tsx"
+import { useAppConfig } from "../config.ts"
+import { confirmDialog } from "../components/dialogs.tsx"
+import { toast } from "../toast.tsx"
 import { Card, CardContent } from "../components/ui.tsx"
 import { Empty } from "../kumo"
 import { JsonBlock } from "../components/pieces.tsx"
@@ -194,6 +197,8 @@ function AgentPageBody({
   const isStreaming = useChatSelector((s) => s.activeThread.isStreaming)
   // transport/provider failures (bad key, network, stream errors) surface here
   const chatError = useChatSelector((s) => s.error)
+  const appConfig = useAppConfig()
+  const canWrite = appConfig !== null && appConfig.readonly !== true && appConfig.role !== "viewer"
 
   const send = () => {
     if (!config.apiKey.trim()) return
@@ -244,7 +249,12 @@ function AgentPageBody({
           />
         )}
         {messages.map((m: ChatMessage) => (
-          <MessageBubble key={m.id} message={m} />
+          <MessageBubble
+            key={m.id}
+            message={m}
+            canWrite={canWrite}
+            cluster={config.cluster || globalCluster || undefined}
+          />
         ))}
         {isStreaming && (
           <div className="text-[12px] text-kumo-subtle" data-testid="agent-streaming">
@@ -287,7 +297,7 @@ function AgentPageBody({
 
 type AgentUIMessage = ChatMessage
 
-function MessageBubble({ message }: { message: AgentUIMessage }) {
+function MessageBubble({ message, canWrite, cluster }: { message: AgentUIMessage; canWrite: boolean; cluster?: string }) {
   const isUser = message.role === "user"
   return (
     <div className={`flex flex-col ${isUser ? "items-end" : "items-start"}`}>
@@ -297,24 +307,24 @@ function MessageBubble({ message }: { message: AgentUIMessage }) {
         }`}
       >
         {message.parts.map((part: MessagePart, i: number) => (
-          <MessagePartView key={i} part={part} />
+          <MessagePartView key={i} part={part} canWrite={canWrite} cluster={cluster} />
         ))}
       </div>
     </div>
   )
 }
 
-function MessagePartView({ part }: { part: MessagePart }) {
+function MessagePartView({ part, canWrite, cluster }: { part: MessagePart; canWrite: boolean; cluster?: string }) {
   if (part.type === "text") {
     return <p className="whitespace-pre-wrap">{part.text}</p>
   }
   if (part.type === "tool-invocation") {
-    return <ToolCard part={part} />
+    return <ToolCard part={part} canWrite={canWrite} cluster={cluster} />
   }
   return null
 }
 
-function ToolCard({ part }: { part: ToolInvocationMessagePart }) {
+function ToolCard({ part, canWrite, cluster }: { part: ToolInvocationMessagePart; canWrite: boolean; cluster?: string }) {
   const [open, setOpen] = React.useState(false)
   const isError = part.state === "output-error"
   const tone = isError ? "err" : part.state === "output-available" ? "ok" : "info"
@@ -332,6 +342,7 @@ function ToolCard({ part }: { part: ToolInvocationMessagePart }) {
         <span className="ml-auto text-[10px] text-kumo-subtle">{open ? "hide" : "details"}</span>
       </button>
       {isError && part.errorText && <div className="mt-1 text-[12px] text-kumo-danger">{part.errorText}</div>}
+      {!isError && part.state === "output-available" && <ToolWidget toolName={part.toolName} output={part.output} canWrite={canWrite} cluster={cluster} />}
       {open && (
         <div className="mt-2 space-y-2">
           <div>
@@ -346,4 +357,84 @@ function ToolCard({ part }: { part: ToolInvocationMessagePart }) {
       )}
     </div>
   )
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+/** Safe typed summaries for common read tools; model output is never treated as markup or code. */
+function ToolWidget({ toolName, output, canWrite, cluster }: { toolName: string; output: unknown; canWrite: boolean; cluster?: string }) {
+  if (toolName === "overview" && isRecord(output)) {
+    const messages = isRecord(output.messages) ? output.messages : null
+    if (!messages) return <UnexpectedWidget />
+    const entries = Object.entries(messages)
+    return (
+      <div className="mt-2 rounded border border-kumo-brand/30 bg-kumo-tint/40 p-2 text-[12px]" data-testid="agent-widget-overview">
+        <div className="flex items-center justify-between gap-2 font-medium">
+          <span>Cluster overview</span>
+          <a
+            className="text-kumo-link hover:underline"
+            href="#/overview"
+            onClick={() => cluster && setCluster(cluster)}
+          >
+            open overview
+          </a>
+        </div>
+        {entries.length > 0 && (
+          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-kumo-subtle">
+            {entries.map(([key, value]) => <span key={key}>{key}: {typeof value === "number" ? value : "—"}</span>)}
+          </div>
+        )}
+      </div>
+    )
+  }
+  if ((toolName === "query_messages" || toolName === "list_traces") && isRecord(output)) {
+    if (!Array.isArray(output.rows)) return <UnexpectedWidget />
+    const rows = output.rows
+    const total = typeof output.total === "number" ? output.total : rows.length
+    const route = toolName === "query_messages" ? "#/messages" : "#/traces"
+    const failedId: string | undefined = toolName === "query_messages" ? (rows.find((row): row is Record<string, unknown> => isRecord(row) && row.failed === true && typeof row.id === "string")?.id as string | undefined) : undefined
+    const retry = async () => {
+      if (!canWrite || !failedId) return
+      if (!(await confirmDialog({ title: "Retry this failed message?", description: "The message will be re-delivered to its entity.", destructive: true, confirmLabel: "Retry" }))) return
+      try {
+        await api.retryMessage(failedId, cluster)
+        toast.success("Message retry queued")
+      } catch (error) {
+        toast.error(`Retry failed: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+    return (
+      <div className="mt-2 rounded border border-kumo-line bg-kumo-recessed p-2 text-[12px]" data-testid={`agent-widget-${toolName}`}>
+        <div className="flex items-center justify-between gap-2 font-medium">
+          <span>{toolName === "query_messages" ? "Messages" : "Traces"} · {total} total</span>
+          <a
+            className="text-kumo-link hover:underline"
+            href={route}
+            onClick={() => cluster && setCluster(cluster)}
+          >
+            open page
+          </a>
+        </div>
+        <div className="mt-1 flex flex-wrap items-center gap-2 text-kumo-subtle">
+          <span>showing {Math.min(rows.length, 5)} result{rows.length === 1 ? "" : "s"}</span>
+          {failedId && canWrite && <Button variant="secondary" size="sm" onClick={() => void retry()}>retry failed</Button>}
+        </div>
+      </div>
+    )
+  }
+  if (toolName === "list_workflows" || toolName === "list_crons" || toolName === "list_singletons") {
+    const rows = Array.isArray(output) ? output : isRecord(output) && Array.isArray(output.runners) ? output.runners : null
+    if (rows) {
+      const route = toolName === "list_workflows" ? "#/workflows" : toolName === "list_crons" ? "#/crons" : "#/singletons"
+      return <div className="mt-2 rounded border border-kumo-line bg-kumo-recessed p-2 text-[12px]" data-testid="agent-widget-list"><div className="flex items-center justify-between gap-2 font-medium"><span>{rows.length} result{rows.length === 1 ? "" : "s"}</span><a className="text-kumo-link hover:underline" href={route} onClick={() => cluster && setCluster(cluster)}>open page</a></div></div>
+    }
+    return <UnexpectedWidget />
+  }
+  return null
+}
+
+function UnexpectedWidget() {
+  return <div className="mt-2 rounded border border-kumo-warning/40 bg-kumo-warning/10 p-2 text-[12px] text-kumo-subtle">Tool returned an unexpected shape; open details to inspect the raw response.</div>
 }

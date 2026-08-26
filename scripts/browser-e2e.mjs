@@ -114,7 +114,12 @@ async function runVariant(label, clusterParam) {
       const res = await fetch(`http://127.0.0.1:${PORT + 1}${req.url().replace(/^https?:\/\/[^/]+/, "")}`, {
         headers: req.headers(), method: req.method(), body: ["POST", "PUT"].includes(req.method()) ? req.postData() : undefined
       })
-      route.fulfill({ status: res.status, contentType: res.headers.get("content-type") ?? "application/json", body: await res.text() })
+      const contentType = res.headers.get("content-type") ?? "application/json"
+      if (contentType.startsWith("text/event-stream")) {
+        await route.fulfill({ status: res.status, contentType, body: "" })
+        return
+      }
+      route.fulfill({ status: res.status, contentType, body: await res.text() })
     } catch (e) { route.abort(String(e)) }
   })
   await context.route("**/api/**", async (route) => {
@@ -125,9 +130,14 @@ async function runVariant(label, clusterParam) {
         method: req.method(),
         body: ["POST", "PUT"].includes(req.method()) ? req.postData() : undefined
       })
+      const contentType = res.headers.get("content-type") ?? "application/json"
+      if (contentType.startsWith("text/event-stream")) {
+        await route.fulfill({ status: res.status, contentType, body: "" })
+        return
+      }
       route.fulfill({
         status: res.status,
-        contentType: res.headers.get("content-type") ?? "application/json",
+        contentType,
         body: await res.text()
       })
     } catch (e) {

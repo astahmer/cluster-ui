@@ -180,7 +180,8 @@ async function main() {
   }
 
   // ---- one parent/child flow (for the DAG view) ----------------------------
-  const parent = await seedJob("emails", "sendWeeklyDigest", {
+  const parent = await seedJob("emails", {
+    name: "sendWeeklyDigest",
     state: "active",
     data: { digestFor: "2026-W35" },
     opts: { parentKey: undefined }
@@ -207,9 +208,9 @@ async function main() {
   }
 
   // ---- one paused queue -----------------------------------------------------
-  await seedJob("webhooks", "pausedTick", { state: "wait", data: { note: "queued while paused" } })
+  const pausedJob = await seedJob("webhooks", { name: "pausedTick", state: "wait", data: { note: "queued while paused" } })
   created++
-  await redis.rpush("bull:webhooks:paused", "1")
+  await redis.rpush("bull:webhooks:paused", pausedJob.id)
 
   const counts = {}
   for (const q of ["emails", "payments", "images", "reports", "notifications", "webhooks"]) {

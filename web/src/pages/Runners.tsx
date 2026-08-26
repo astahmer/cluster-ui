@@ -50,7 +50,7 @@ export function RunnersPage() {
             </TR>
           </THead>
           <TBody>
-            {sort.sorted(rows).map((r) => (
+            {sort.sorted(facets.filtered).map((r) => (
               <TR key={r.address}>
                 <TD className="font-medium">{r.address}</TD>
                 <TD className="text-kumo-subtle">

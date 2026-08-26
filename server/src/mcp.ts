@@ -33,7 +33,8 @@ function rpcError(
 
 export async function handleMcpRequest(
   raw: unknown,
-  repoFor: (name: string | undefined) => Repo | null
+  repoFor: (name: string | undefined) => Repo | null,
+  defaultCluster = "default"
 ): Promise<{ status: number; body: unknown }> {
   const req = raw as JsonRpcRequest
 
@@ -60,7 +61,7 @@ export async function handleMcpRequest(
       const cluster = typeof args.cluster === "string" ? args.cluster : undefined
       const repo = repoFor(cluster)
       if (!repo) return rpcResult(req.id, { content: [{ type: "text", text: `unknown cluster: ${cluster}` }], isError: true })
-      const outcome = await callAgentTool(repo, name, args)
+      const outcome = await callAgentTool(repo, name, args, cluster ?? defaultCluster)
       if (!outcome.ok) {
         return rpcResult(req.id, {
           content: [{ type: "text", text: outcome.error }],

@@ -1,6 +1,6 @@
 import { HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "@effect/platform"
 import { Effect, Schedule, Stream } from "effect"
-import { convertToModelMessages, streamText, toUIMessageStream, type LanguageModel, type ToolSet, type UIMessage } from "ai"
+import { convertToModelMessages, stepCountIs, streamText, toUIMessageStream, type LanguageModel, type ToolSet, type UIMessage } from "ai"
 import { createAnthropic } from "@ai-sdk/anthropic"
 import { createOpenAI } from "@ai-sdk/openai"
 import { existsSync, readFileSync } from "node:fs"
@@ -15,7 +15,7 @@ import { makeRedisRepo } from "./redis-repo.ts"
 import { queryRunnerFibers, queryRunnerLogs } from "./singletons.ts"
 import { makeRepo, openDb, type MessageQuery, type Repo } from "./queries.ts"
 import { queryRunnerState } from "./singletons.ts"
-import { actor, createAlert, deleteAlert, listAlerts, listAudit, recordAudit, role, testAlert, updateAlert } from "./ops.ts"
+import { actor, alertCluster, createAlert, deleteAlert, listAlerts, listAudit, recordAudit, role, testAlert, updateAlert } from "./ops.ts"
 
 // ------------------------------------------------------------- cluster registry
 const repos = new Map<string, Repo>(
@@ -85,7 +85,7 @@ function notFound(what: string) {
 function intParam(u: string | null | undefined): number | undefined {
   if (u === undefined || u === null || u === "") return undefined
   const n = Number(u)
-  return Number.isFinite(n) ? n : undefined
+  return Number.isFinite(n) ? Math.trunc(n) : undefined
 }
 
 /** request with merged path params + query params */
@@ -108,14 +108,20 @@ const req = Effect.all([HttpServerRequest.HttpServerRequest, HttpRouter.params])
 /**
  * Vendored @emi/core protocol ChatMessage → ai-sdk UIMessage.
  */
-function toUIMessages(messages: ReadonlyArray<Record<string, unknown>>): UIMessage[] {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function toUIMessages(messages: ReadonlyArray<unknown>): UIMessage[] {
   return messages
+    .filter(isRecord)
     .filter((m) => m.role === "user" || m.role === "assistant")
     .map((m) => ({
       id: typeof m.id === "string" ? m.id : crypto.randomUUID(),
       role: m.role as "user" | "assistant",
       parts: (Array.isArray(m.parts) ? m.parts : []).flatMap((rawPart): UIMessage["parts"] => {
-        const part = rawPart as Record<string, unknown>
+        if (!isRecord(rawPart)) return []
+        const part = rawPart
         switch (part.type) {
           case "text":
             return [{ type: "text", text: String(part.text ?? "") }]
@@ -222,55 +228,63 @@ const BULK_ACTIONS = {
 } as const
 
 /** Per-id results; individual failures never fail the whole batch. */
-const bulkActionHandler = Effect.map(reqWithBody, (p): HttpServerResponse.HttpServerResponse => {
-  try {
-    assertWritable(config.readonly)
-    if (role === "viewer") throw new ActionError("operator role required", 403)
-    const repo = repoFor(p.cluster ?? p.body?.cluster)
-    if (!repo) return notFound("cluster")
-    const action = p.body?.action
-    const run = typeof action === "string" ? BULK_ACTIONS[action as keyof typeof BULK_ACTIONS] : undefined
-    if (!run) {
-      return HttpServerResponse.unsafeJson(
-        { error: "action must be one of retry | interrupt | delete" },
-        { status: 400 }
-      )
-    }
-    const ids = p.body?.ids
-    if (!Array.isArray(ids) || ids.length === 0) {
-      return HttpServerResponse.unsafeJson({ error: "non-empty ids array is required" }, { status: 400 })
-    }
-    const results = ids.slice(0, 500).map((raw: unknown) => {
-      const id = typeof raw === "string" ? raw : String(raw ?? "")
-      try {
-        run(repo, id)
-        return { id, ok: true }
-      } catch (e) {
-        return {
-          id,
-          ok: false,
-          error: e instanceof Error ? e.message : String(e),
-          status: e instanceof ActionError ? e.status : 500
+const bulkActionHandler = Effect.flatMap(reqWithBody, (p) =>
+  Effect.tryPromise(async (): Promise<HttpServerResponse.HttpServerResponse> => {
+    try {
+      assertWritable(config.readonly)
+      if (role === "viewer") throw new ActionError("operator role required", 403)
+      const repo = repoFor(p.cluster ?? p.body?.cluster)
+      if (!repo) return notFound("cluster")
+      const action = p.body?.action as "retry" | "interrupt" | "delete" | undefined
+      if (action !== "retry" && action !== "interrupt" && action !== "delete") {
+        return HttpServerResponse.unsafeJson(
+          { error: "action must be one of retry | interrupt | delete" },
+          { status: 400 }
+        )
+      }
+      const ids = p.body?.ids
+      if (!Array.isArray(ids) || ids.length === 0) {
+        return HttpServerResponse.unsafeJson({ error: "non-empty ids array is required" }, { status: 400 })
+      }
+      const results: Array<{ id: string; ok: boolean; error?: string; status?: number }> = []
+      for (const raw of ids.slice(0, 500)) {
+        const id = typeof raw === "string" ? raw : String(raw ?? "")
+        try {
+          await dispatchAction(repo, action, BULK_ACTIONS[action], id)
+          results.push({ id, ok: true })
+        } catch (e) {
+          results.push({
+            id,
+            ok: false,
+            error: e instanceof Error ? e.message : String(e),
+            status: e instanceof ActionError ? e.status : 500
+          })
         }
       }
-    })
-    if (results.some((result) => result.ok)) {
-      recordAudit({ actor, role, action: `bulk:${String(action)}`, cluster: p.cluster ?? p.body?.cluster ?? config.clusters[0].name, target: `${results.filter((result) => result.ok).length} messages` })
+      if (results.some((result) => result.ok)) {
+        recordAudit({
+          actor,
+          role,
+          action: `bulk:${action}`,
+          cluster: p.cluster ?? p.body?.cluster ?? config.clusters[0].name,
+          target: results.filter((result) => result.ok).map((result) => result.id).slice(0, 10).join(",") + (results.filter((result) => result.ok).length > 10 ? "…" : "")
+        })
+      }
+      return json({ results })
+    } catch (e) {
+      if (e instanceof ActionError) {
+        return HttpServerResponse.unsafeJson({ error: e.message }, { status: e.status })
+      }
+      return HttpServerResponse.unsafeJson(
+        { error: e instanceof Error ? e.message : String(e) },
+        { status: 500 }
+      )
     }
-    return json({ results })
-  } catch (e) {
-    if (e instanceof ActionError) {
-      return HttpServerResponse.unsafeJson({ error: e.message }, { status: e.status })
-    }
-    return HttpServerResponse.unsafeJson(
-      { error: e instanceof Error ? e.message : String(e) },
-      { status: 500 }
-    )
-  }
-})
+  })
+)
 
 const opsRouter = HttpRouter.empty.pipe(
-  HttpRouter.get("/api/alerts", Effect.succeed(json(listAlerts()))),
+  HttpRouter.get("/api/alerts", Effect.sync(() => json(listAlerts()))),
   HttpRouter.post("/api/alerts", Effect.flatMap(reqWithBody, (p) => Effect.sync(() => {
     try {
       assertWritable(config.readonly)
@@ -300,7 +314,7 @@ const opsRouter = HttpRouter.empty.pipe(
       if (role === "viewer") throw new ActionError("operator role required", 403)
       const id = decodeURIComponent(p.id!)
       const ok = deleteAlert(id)
-      if (ok) recordAudit({ actor, role, action: "alert-delete", cluster: "*", target: id })
+      if (ok) recordAudit({ actor, role, action: "alert-delete", cluster: alertCluster(id), target: id })
       return json({ ok })
     } catch (e) {
       return HttpServerResponse.unsafeJson({ error: e instanceof Error ? e.message : String(e) }, { status: e instanceof ActionError ? e.status : 400 })
@@ -312,7 +326,7 @@ const opsRouter = HttpRouter.empty.pipe(
       if (role === "viewer") throw new ActionError("operator role required", 403)
       const id = decodeURIComponent(p.id!)
       const result = await testAlert(id)
-      recordAudit({ actor, role, action: "alert-test", cluster: "*", target: id })
+      recordAudit({ actor, role, action: "alert-test", cluster: alertCluster(id), target: id })
       return json(result)
     } catch (e) {
       return HttpServerResponse.unsafeJson({ error: e instanceof Error ? e.message : String(e) }, { status: e instanceof ActionError ? e.status : 400 })
@@ -578,13 +592,13 @@ const redisRouter = HttpRouter.empty.pipe(
     redisOnlyHandler(async (repo, body) => {
       const state = body.state === "failed" ? "failed" : body.state === "*" ? "*" : "completed"
       if (state === "*") {
-        const done = await repo.actions.clean(String(body.queue ?? "*"), "completed", {
-          olderThanMs: numOrUndefined(body.olderThanMs),
-          count: numOrUndefined(body.count)
-        })
-        const failed = await repo.actions.clean(String(body.queue ?? "*"), "failed", {
-          olderThanMs: numOrUndefined(body.olderThanMs),
-          count: numOrUndefined(body.count)
+        const limit = numOrUndefined(body.count)
+        const options = { olderThanMs: numOrUndefined(body.olderThanMs), count: limit }
+        const done = await repo.actions.clean(String(body.queue ?? "*"), "completed", options)
+        const remaining = limit === undefined ? undefined : Math.max(0, limit - done.removed)
+        const failed = remaining === 0 ? { removed: 0 } : await repo.actions.clean(String(body.queue ?? "*"), "failed", {
+          olderThanMs: options.olderThanMs,
+          count: remaining
         })
         return { removed: done.removed + failed.removed }
       }
@@ -673,7 +687,7 @@ const agentRouter = HttpRouter.empty.pipe(
   HttpRouter.post(
     "/mcp",
     Effect.flatMap(reqWithBody, (p) =>
-      Effect.tryPromise(() => handleMcpRequest(p.body, repoFor)).pipe(
+      Effect.tryPromise(() => handleMcpRequest(p.body, repoFor, config.clusters[0].name)).pipe(
         Effect.map((outcome) =>
           HttpServerResponse.unsafeJson(outcome.body, {
             status: outcome.status,
@@ -698,7 +712,8 @@ const agentRouter = HttpRouter.empty.pipe(
         if (!modelId) {
           return HttpServerResponse.unsafeJson({ error: "missing model in request body" }, { status: 400 })
         }
-        const repo = repoFor(typeof body.cluster === "string" && body.cluster !== "" ? body.cluster : undefined)
+        const selectedCluster = typeof body.cluster === "string" && body.cluster !== "" ? body.cluster : config.clusters[0].name
+        const repo = repoFor(selectedCluster)
         if (!repo) return notFound("cluster")
 
         let model: LanguageModel
@@ -722,14 +737,15 @@ const agentRouter = HttpRouter.empty.pipe(
             description: t.description,
             inputSchema: t.parameters,
             execute: (input: unknown) =>
-              callAgentTool(repo, t.name, input).then((r) => (r.ok ? r.result : { error: r.error }))
+              callAgentTool(repo, t.name, input, selectedCluster).then((r) => (r.ok ? r.result : { error: r.error }))
           }
         }
 
         const result = streamText({
           model,
           messages: await convertToModelMessages(uiMessages),
-          tools
+          tools,
+          stopWhen: stepCountIs(5)
         })
         return HttpServerResponse.raw(toUIMessageStream(result), {
           headers: {
@@ -763,9 +779,37 @@ export const api = HttpRouter.concat(HttpRouter.concat(HttpRouter.concat(baseRou
         repo.traces({
           limit: p.limit ? intParam(p.limit) ?? 50 : 50,
           offset: intParam(p.offset) ?? 0,
-          q: typeof p.q === "string" && p.q !== "" ? p.q : undefined
+          q: typeof p.q === "string" && p.q !== "" ? p.q : undefined,
+          createdAfter: intParam(p.createdAfter),
+          createdBefore: intParam(p.createdBefore)
         })
       )
+    })
+  ),
+
+  HttpRouter.get(
+    "/api/traces/:traceId/events",
+    Effect.flatMap(req, (p) => {
+      const repo = repoFor(p.cluster)
+      if (!repo || !p.traceId) return Effect.succeed(notFound(p.traceId ? "cluster" : "traceId"))
+      const traceId = decodeURIComponent(p.traceId)
+      const encoder = new TextEncoder()
+      const frame = () => Effect.tryPromise(async () => {
+        try {
+          const rows = await Promise.resolve(repo.trace(traceId))
+          return encoder.encode(`event: trace\ndata: ${JSON.stringify({ traceId, rows, sentAt: Date.now() })}\n\n`)
+        } catch (error) {
+          return encoder.encode(`event: trace-error\ndata: ${JSON.stringify({ error: String(error) })}\n\n`)
+        }
+      })
+      const stream = Stream.concat(
+        Stream.fromEffect(frame()),
+        Stream.fromSchedule(Schedule.spaced("2 seconds")).pipe(Stream.mapEffect(() => frame()))
+      )
+      return Effect.succeed(HttpServerResponse.stream(stream, {
+        contentType: "text/event-stream",
+        headers: { "cache-control": "no-store", "x-accel-buffering": "no" }
+      }))
     })
   ),
 
@@ -822,20 +866,19 @@ export const api = HttpRouter.concat(HttpRouter.concat(HttpRouter.concat(baseRou
     Effect.map(req, (p) => {
       const repo = repoFor(p.cluster) ?? defaultRepo
       const encoder = new TextEncoder()
-      const frame = () => {
-        let payload: unknown
+      const frame = () => Effect.tryPromise(async () => {
         try {
-          payload = repo.overview()
+          const payload = await Promise.resolve(repo.overview())
+          return encoder.encode(`event: overview\ndata: ${JSON.stringify(payload)}\n\n`)
         } catch (e) {
-          payload = { error: String(e) }
+          return encoder.encode(`event: overview-error\ndata: ${JSON.stringify({ error: String(e) })}\n\n`)
         }
-        return encoder.encode(`event: overview\ndata: ${JSON.stringify(payload)}\n\n`)
-      }
+      })
       // initial snapshot immediately, then every 5s; the request scope
       // interrupts the stream when the client disconnects
       const stream = Stream.concat(
-        Stream.make(frame()),
-        Stream.fromSchedule(Schedule.spaced("5 seconds")).pipe(Stream.map(() => frame()))
+        Stream.fromEffect(frame()),
+        Stream.fromSchedule(Schedule.spaced("5 seconds")).pipe(Stream.mapEffect(() => frame()))
       )
       return HttpServerResponse.stream(stream, {
         contentType: "text/event-stream",

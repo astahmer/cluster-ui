@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 import { isIP } from "node:net"
 import { lookup } from "node:dns/promises"
+import { Agent } from "undici"
 import type { Repo } from "./queries.ts"
 
 export type Role = "viewer" | "operator" | "admin"
@@ -35,6 +36,7 @@ interface StateFile { alerts: AlertRule[]; audit: AuditEntry[] }
 const stateFile = resolve(process.env.CLUSTER_UI_STATE_FILE ?? "./data/cluster-ui-state.json")
 const MAX_ALERTS = 100
 const MAX_AUDIT = 1000
+const REDACTED_WEBHOOK = "[configured]"
 const state: StateFile = { alerts: [], audit: [] }
 let loaded = false
 const trueSince = new Map<string, number>()
@@ -73,40 +75,51 @@ export function validateWebhookUrl(value: unknown): string {
   if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host === "::1") {
     throw new Error("webhookUrl host is not allowed")
   }
-  const ip = isIP(host)
-  if (ip === 4) {
-    const p = host.split(".").map(Number)
-    if (p[0] === 0 || p[0] === 10 || p[0] === 127 || p[0] === 255 || (p[0] === 169 && p[1] === 254) || (p[0] === 192 && p[1] === 168) || (p[0] === 172 && p[1] >= 16 && p[1] <= 31)) throw new Error("webhookUrl host is private")
-  }
-  if (ip === 6 && (host === "::1" || host.startsWith("fc") || host.startsWith("fd") || host.startsWith("fe8") || host.startsWith("fe9") || host.startsWith("fea") || host.startsWith("feb"))) throw new Error("webhookUrl host is private")
+  if (isPrivateAddress(host)) throw new Error("webhookUrl host is private")
   return url.toString()
 }
 
 function isPrivateAddress(value: string): boolean {
   const host = value.replace(/^\[|\]$/g, "").toLowerCase()
+  const mappedDotted = host.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/)
+  if (mappedDotted) return isPrivateAddress(mappedDotted[1])
+  const mappedHex = host.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/)
+  if (mappedHex) {
+    const high = Number.parseInt(mappedHex[1], 16)
+    const low = Number.parseInt(mappedHex[2], 16)
+    return isPrivateAddress(`${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`)
+  }
   const ip = isIP(host)
   if (ip === 4) {
     const p = host.split(".").map(Number)
-    return p[0] === 0 || p[0] === 10 || p[0] === 127 ||
-      (p[0] === 169 && p[1] === 254) ||
-      (p[0] === 172 && p[1] >= 16 && p[1] <= 31) ||
-      (p[0] === 192 && p[1] === 168) || p[0] === 255
+    const value = (((p[0] * 256 + p[1]) * 256 + p[2]) * 256 + p[3]) >>> 0
+    const first16 = (p[0] * 256 + p[1]) >>> 0
+    return p.some((part) => !Number.isInteger(part) || part < 0 || part > 255) ||
+      p[0] === 0 || p[0] === 10 || p[0] === 127 || p[0] >= 224 || p[0] === 255 ||
+      (p[0] === 100 && p[1] >= 64 && p[1] <= 127) ||
+      (p[0] === 169 && p[1] === 254) || (p[0] === 172 && p[1] >= 16 && p[1] <= 31) ||
+      (p[0] === 192 && (p[1] === 0 || p[1] === 168)) ||
+      (p[0] === 198 && (p[1] === 18 || p[1] === 51)) ||
+      (p[0] === 203 && p[1] === 0 && p[2] === 113) ||
+      first16 === 0xc612 || first16 === 0xc633 || value === 0xffffffff
   }
   if (ip === 6) {
-    return host === "::1" || host === "::" || host.startsWith("fc") || host.startsWith("fd") ||
-      /^fe[89ab]/.test(host) || host.startsWith("2001:db8:")
+    if (host === "::1" || host === "::" || host.startsWith("fc") || host.startsWith("fd") ||
+      /^fe[89ab]/.test(host) || host.startsWith("2001:db8:") || host.startsWith("ff")) return true
+    const first = Number.parseInt(host.split(":")[0] || "0", 16)
+    return !Number.isFinite(first) || first < 0x2000 || first > 0x3fff
   }
   return false
 }
 
-async function assertSafeWebhookDestination(webhookUrl: string): Promise<void> {
+async function assertSafeWebhookDestination(webhookUrl: string): Promise<{ address: string; family: number }> {
   const url = new URL(webhookUrl)
   if (isPrivateAddress(url.hostname)) throw new Error("webhookUrl host is private")
   try {
     const addresses = await lookup(url.hostname, { all: true })
-    if (addresses.some((entry) => isPrivateAddress(entry.address))) {
-      throw new Error("webhookUrl resolves to a private host")
-    }
+    const safe = addresses.filter((entry) => !isPrivateAddress(entry.address))
+    if (safe.length === 0) throw new Error("webhookUrl resolves to a private host")
+    return safe[0]
   } catch (error) {
     if (error instanceof Error && error.message.includes("private")) throw error
     throw new Error("webhookUrl host could not be resolved")
@@ -126,19 +139,24 @@ function normalizeRule(input: unknown, existing?: AlertRule): AlertRule {
   if (!["gt", "gte", "eq"].includes(String(operator))) throw new Error("invalid operator")
   if (!Number.isFinite(threshold) || threshold < 0 || threshold > 1_000_000_000) throw new Error("threshold is out of range")
   if (!Number.isFinite(durationMs) || durationMs < 0 || durationMs > 7 * 24 * 60 * 60_000) throw new Error("durationMs is out of range")
+  const webhookValue = body.webhookUrl === REDACTED_WEBHOOK ? existing?.webhookUrl : body.webhookUrl ?? existing?.webhookUrl
   return {
     id: existing?.id ?? crypto.randomUUID(), name, cluster,
     metric: metric as AlertMetric, operator: operator as AlertOperator,
     threshold, durationMs: Math.floor(durationMs),
-    webhookUrl: validateWebhookUrl(body.webhookUrl ?? existing?.webhookUrl),
+    webhookUrl: validateWebhookUrl(webhookValue),
     enabled: typeof body.enabled === "boolean" ? body.enabled : existing?.enabled ?? true,
     lastTriggeredAt: existing?.lastTriggeredAt ?? null
   }
 }
 
-export function listAlerts(): AlertRule[] { load(); return state.alerts.map((x) => ({ ...x })) }
+export function listAlerts(): AlertRule[] {
+  load()
+  return state.alerts.map((x) => ({ ...x, webhookUrl: REDACTED_WEBHOOK }))
+}
 export function createAlert(input: unknown): AlertRule { load(); if (state.alerts.length >= MAX_ALERTS) throw new Error("alert limit reached"); const rule = normalizeRule(input); state.alerts.push(rule); save(); return rule }
 export function updateAlert(id: string, input: unknown): AlertRule | null { load(); const i = state.alerts.findIndex((x) => x.id === id); if (i < 0) return null; const rule = normalizeRule(input, state.alerts[i]); state.alerts[i] = rule; save(); return rule }
+export function alertCluster(id: string): string { load(); return state.alerts.find((x) => x.id === id)?.cluster ?? "*" }
 export function deleteAlert(id: string): boolean { load(); const i = state.alerts.findIndex((x) => x.id === id); if (i < 0) return false; state.alerts.splice(i, 1); save(); trueSince.delete(id); lastDelivery.delete(id); return true }
 
 export function recordAudit(entry: Omit<AuditEntry, "timestamp" | "success">) { load(); state.audit.push({ ...entry, timestamp: Date.now(), success: true }); if (state.audit.length > MAX_AUDIT) state.audit.splice(0, state.audit.length - MAX_AUDIT); save() }
@@ -150,13 +168,30 @@ function metricValue(overview: any, metric: AlertMetric): number {
 function matches(value: number, op: AlertOperator, threshold: number): boolean { return op === "gt" ? value > threshold : op === "gte" ? value >= threshold : value === threshold }
 
 async function deliver(rule: AlertRule, value: number, test = false) {
-  await assertSafeWebhookDestination(rule.webhookUrl)
-  const response = await fetch(rule.webhookUrl, {
-    method: "POST", redirect: "manual", headers: { "content-type": "application/json", "user-agent": "cluster-ui-alerts" },
-    body: JSON.stringify({ type: test ? "cluster-ui.alert.test" : "cluster-ui.alert", ruleId: rule.id, ruleName: rule.name, cluster: rule.cluster, metric: rule.metric, operator: rule.operator, threshold: rule.threshold, value, triggeredAt: Date.now() }),
-    signal: AbortSignal.timeout(5000)
+  const destination = await assertSafeWebhookDestination(rule.webhookUrl)
+  // Pin the already-validated DNS result for this request. This prevents a
+  // hostname from being re-resolved to a private address between validation
+  // and connection establishment (DNS rebinding).
+  const dispatcher = new Agent({
+    connect: {
+      lookup: ((
+        _hostname: string,
+        _options: unknown,
+        callback: (error: Error | null, address?: string, family?: number) => void
+      ) => callback(null, destination.address, destination.family)) as never
+    }
   })
-  if (!response.ok) throw new Error(`webhook returned ${response.status}`)
+  try {
+    const response = await fetch(rule.webhookUrl, {
+      method: "POST", redirect: "manual", headers: { "content-type": "application/json", "user-agent": "cluster-ui-alerts" },
+      body: JSON.stringify({ type: test ? "cluster-ui.alert.test" : "cluster-ui.alert", ruleId: rule.id, ruleName: rule.name, cluster: rule.cluster, metric: rule.metric, operator: rule.operator, threshold: rule.threshold, value, triggeredAt: Date.now() }),
+      signal: AbortSignal.timeout(5000),
+      dispatcher
+    } as RequestInit & { dispatcher: Agent })
+    if (!response.ok) throw new Error(`webhook returned ${response.status}`)
+  } finally {
+    await dispatcher.close()
+  }
 }
 
 export async function testAlert(id: string): Promise<{ ok: true }> { load(); const rule = state.alerts.find((x) => x.id === id); if (!rule) throw new Error("alert not found"); const value = 0; await deliver(rule, value, true); return { ok: true } }

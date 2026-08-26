@@ -22,21 +22,21 @@ const SAMPLE_INTERVAL_MS = 10_000
 // 7d at ~10s would be ~60k points, so a hard per-series cap below keeps
 // memory bounded if sampling ever runs faster than the nominal interval
 const RETENTION_MS = 8 * 24 * 60 * 60 * 1000
-/** oldest-dropped-first ceiling per series (~3.5 days at 10s cadence) */
-const MAX_SAMPLES_PER_SERIES = 30_000
+/** oldest-dropped-first ceiling for roughly 8 days at 10s cadence */
+const MAX_SAMPLES_PER_SERIES = 70_000
 
 /** per-cluster series */
 const byName = new Map<string, Array<MetricSample>>()
 /** aggregated across all clusters (aligned to sample time) */
 const aggregate: Array<MetricSample> = []
 
-function takeSample(repos: ReadonlyArray<[string, Repo]>) {
+async function takeSample(repos: ReadonlyArray<[string, Repo]>) {
   const t = Date.now()
   const totals = { pending: 0, inflight: 0, scheduled: 0, done: 0, failed: 0, unassignedShards: 0, runners: 0 }
-  for (const [name, repo] of repos) {
+  const samples = await Promise.all(repos.map(async ([name, repo]) => {
     try {
-      const ov = repo.overview()
-      const s: MetricSample = {
+      const ov = await Promise.resolve(repo.overview())
+      return { name, sample: {
         t,
         pending: ov.messages.pending,
         inflight: ov.messages.inflight,
@@ -45,23 +45,27 @@ function takeSample(repos: ReadonlyArray<[string, Repo]>) {
         failed: ov.messages.failed,
         unassignedShards: ov.unassignedShards,
         runners: ov.runners.total
-      }
-      let series = byName.get(name)
-      if (!series) {
-        series = []
-        byName.set(name, series)
-      }
-      push(series, s)
-      totals.pending += s.pending
-      totals.inflight += s.inflight
-      totals.scheduled += s.scheduled
-      totals.done += s.done
-      totals.failed += s.failed
-      totals.unassignedShards += s.unassignedShards
-      totals.runners += s.runners
+      } satisfies MetricSample }
     } catch {
-      // a broken cluster db must not kill sampling of the others
+      return null
     }
+  }))
+  for (const entry of samples) {
+    if (!entry) continue
+    const { name, sample: s } = entry
+    let series = byName.get(name)
+    if (!series) {
+      series = []
+      byName.set(name, series)
+    }
+    push(series, s)
+    totals.pending += s.pending
+    totals.inflight += s.inflight
+    totals.scheduled += s.scheduled
+    totals.done += s.done
+    totals.failed += s.failed
+    totals.unassignedShards += s.unassignedShards
+    totals.runners += s.runners
   }
   push(aggregate, { t, ...totals })
 }
@@ -77,8 +81,8 @@ function push(buf: Array<MetricSample>, sample: MetricSample) {
   if (drop > 0) buf.splice(0, drop)
 }
 
-export function recordSample(repos: ReadonlyArray<[string, Repo]>): void {
-  takeSample(repos)
+export async function recordSample(repos: ReadonlyArray<[string, Repo]>): Promise<void> {
+  await takeSample(repos)
 }
 
 /** oldest-first history; `cluster` narrows to one cluster, default aggregates all */
@@ -111,12 +115,6 @@ export function prometheus(): string {
       lines.push(`cluster_ui_messages${multi ? `{cluster="${name}",state="${state}"}` : `{state="${state}"}`} ${s[state]}`)
     }
   }
-  if (!multi && aggregate.length > 0) {
-    const a = aggregate[aggregate.length - 1]
-    for (const state of PROM_STATES) {
-      lines.push(`cluster_ui_messages{state="${state}"} ${a[state]}`)
-    }
-  }
   lines.push("# HELP cluster_ui_unassigned_shards Shards not owned by any runner.")
   lines.push("# TYPE cluster_ui_unassigned_shards gauge")
   for (const [name, s] of latestPerCluster()) {
@@ -139,7 +137,7 @@ export const samplerLayer = (
     Effect.forkDaemon(
       Effect.forever(
         Effect.andThen(
-          Effect.sync(() => recordSample(getRepos())),
+          Effect.promise(() => recordSample(getRepos())),
           Effect.sleep(SAMPLE_INTERVAL_MS)
         )
       ).pipe(Effect.ignore)

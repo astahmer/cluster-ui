@@ -64,9 +64,7 @@ const routes = {
   "/api/crons": [
     { name: "ClusterCron/NightlyCleanup", entityType: "ClusterCron/NightlyCleanup", lastRunAt: Date.now() - 3600_000, nextRunAt: Date.now() + 3600_000, lastStatus: "done", overdue: false }
   ],
-  "/api/entity-instances": [
-    { entityId: "counter-1", total: 3, pending: 1, inflight: 0, scheduled: 0, done: 2, failed: 0, lastActivityAt: Date.now() }
-  ],
+  "/api/entity-instances": { rows: [{ entityId: "counter-1", total: 3, pending: 1, inflight: 0, scheduled: 0, done: 2, failed: 0, lastActivityAt: Date.now() }], total: 1, page: 1, pageSize: 50 },
   "/api/overview": overview,
   "/api/runners": [runner],
   "/api/shards": Array.from({ length: 16 }, (_, i) => ({

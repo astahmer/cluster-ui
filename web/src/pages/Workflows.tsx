@@ -39,8 +39,8 @@ export function WorkflowListPage() {
   const totalRuns = rows.reduce((acc, w) => acc + w.runs, 0)
   const sortedRows =
     sortBy === "name" ?
-      [...rows].sort((a, b) => a.name.localeCompare(b.name)) :
-      [...rows].sort((a, b) =>
+      [...facets.filtered].sort((a, b) => a.name.localeCompare(b.name)) :
+      [...facets.filtered].sort((a, b) =>
         sortBy === "runs" ? b.runs - a.runs : (b.failedRuns ?? 0) - (a.failedRuns ?? 0)
       )
 
@@ -159,7 +159,6 @@ export function WorkflowRunsPage({
 
   return (
     <div>
-      <FilterBar defs={facetDefs} rows={runs ?? []} facets={facets} />
       <PageHeader title={name} subtitle="workflow executions">
         <a href="#/workflows" className="text-[13px] text-kumo-subtle hover:text-kumo-default">
           ← all workflows
@@ -177,6 +176,7 @@ export function WorkflowRunsPage({
           ))}
         </Select>
       </PageHeader>
+      <FilterBar defs={facetDefs} rows={runs ?? []} facets={facets} />
       {(statusFilter || sort.sortKey !== null) && (
         <div className="mb-2 flex items-center gap-1.5">
           {statusFilter && <FilterChip label={`status: ${statusFilter}`} onRemove={() => setStatusParam("")} />}

@@ -14,6 +14,7 @@ import { AgentPage } from "./pages/Agent.tsx"
 import { McpPage } from "./pages/Mcp.tsx"
 import { QueuesPage } from "./pages/Queues.tsx"
 import { OperationsPage } from "./pages/Operations.tsx"
+import { AUTH_REQUIRED_EVENT, api, setToken } from "./api.ts"
 
 /**
  * MessagesPage supports initialFilters (CONTRACT.md W2) and messageId
@@ -27,11 +28,46 @@ const SeededMessagesPage = MessagesPage as unknown as React.ComponentType<{
     status?: string
     failed?: string
     q?: string
+    createdAfter?: string
+    createdBefore?: string
   }
   messageId?: string
 }>
 
 const TypedEntityInstances = EntityInstancesPage as React.ComponentType<{ entityType: string }>
+
+function AuthGate({ children }: { children: React.ReactNode }) {
+  const [required, setRequired] = React.useState(false)
+  const [token, setTokenValue] = React.useState("")
+  const [error, setError] = React.useState<string | null>(null)
+  React.useEffect(() => {
+    const show = () => setRequired(true)
+    window.addEventListener(AUTH_REQUIRED_EVENT, show)
+    return () => window.removeEventListener(AUTH_REQUIRED_EVENT, show)
+  }, [])
+  if (!required) return <>{children}</>
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault()
+    setError(null)
+    try {
+      await api.login(token)
+      setToken(token)
+      setRequired(false)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }
+  return (
+    <main className="grid min-h-screen place-items-center bg-kumo-canvas p-4 text-kumo-default">
+      <form onSubmit={(event) => void submit(event)} className="w-full max-w-sm space-y-4 rounded-lg border border-kumo-line bg-kumo-base p-6 shadow-sm">
+        <div><h1 className="text-lg font-semibold">Sign in to cluster-ui</h1><p className="mt-1 text-[13px] text-kumo-subtle">Enter the deployment token to continue.</p></div>
+        <input autoFocus type="password" value={token} onChange={(event) => setTokenValue(event.target.value)} className="w-full rounded-md border border-kumo-line bg-kumo-base px-3 py-2 text-sm" aria-label="deployment token" />
+        {error && <p className="text-[13px] text-kumo-danger">{error}</p>}
+        <button type="submit" disabled={!token} className="w-full rounded-md bg-kumo-brand px-3 py-2 text-sm font-medium text-white disabled:opacity-50">Sign in</button>
+      </form>
+    </main>
+  )
+}
 
 export function App() {
   const route = useRoute()
@@ -65,7 +101,12 @@ export function App() {
           parts.length >= 2 ? (
             <TraceDetailPage key={parts[1]} traceId={decodeURIComponent(parts[1])} />
           ) : (
-            <TracesPage />
+            <TracesPage
+              initialFilters={{
+                createdAfter: route.params.get("createdAfter") ?? undefined,
+                createdBefore: route.params.get("createdBefore") ?? undefined
+              }}
+            />
           )
         break
       case "singletons":
@@ -92,7 +133,9 @@ export function App() {
               entityId: route.params.get("entityId") ?? undefined,
               status: route.params.get("status") ?? undefined,
               failed: route.params.get("failed") ?? undefined,
-              q: route.params.get("q") ?? undefined
+              q: route.params.get("q") ?? undefined,
+              createdAfter: route.params.get("createdAfter") ?? undefined,
+              createdBefore: route.params.get("createdBefore") ?? undefined
             }}
           />
         )
@@ -126,5 +169,5 @@ export function App() {
     content = <ErrorNote error={String(e)} />
   }
 
-  return <Shell route={route.path}>{content}</Shell>
+  return <AuthGate><Shell route={route.path}>{content}</Shell></AuthGate>
 }

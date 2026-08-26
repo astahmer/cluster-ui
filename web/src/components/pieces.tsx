@@ -150,18 +150,25 @@ export function DetailPanel({
 
 export function useMessageDetail(id: string | null) {
   const [detail, setDetail] = React.useState<MessageDetail | null>(null)
+  const [error, setError] = React.useState<string | null>(null)
+  const [retryToken, setRetryToken] = React.useState(0)
   React.useEffect(() => {
     let alive = true
     if (!id) {
       setDetail(null)
+      setError(null)
       return
     }
-    api.message(id).then((d) => alive && setDetail(d))
+    setDetail(null)
+    setError(null)
+    api.message(id)
+      .then((d) => alive && setDetail(d))
+      .catch((e) => alive && setError(e instanceof Error ? e.message : String(e)))
     return () => {
       alive = false
     }
-  }, [id])
-  return detail
+  }, [id, retryToken])
+  return { detail, error, retry: () => setRetryToken((token) => token + 1) }
 }
 
 export function ActivityDot({ at }: { at: number | null }) {

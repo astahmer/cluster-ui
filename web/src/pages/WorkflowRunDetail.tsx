@@ -145,7 +145,8 @@ export function WorkflowRunPage({
   }, [run, (data?.activities ?? []) as ActivityRow[], executionId, result])
 
 
-  const reload = React.useRef(() => {
+  const reload = React.useRef<() => void>(() => {})
+  reload.current = () => {
     api
       .workflowRun(name, executionId)
       .then((d) => {
@@ -153,9 +154,10 @@ export function WorkflowRunPage({
         setError(null)
       })
       .catch((e) => setError(String(e)))
-  })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  React.useEffect(reload.current, [name, executionId])
+  }
+  React.useEffect(() => {
+    reload.current()
+  }, [name, executionId])
 
 
   const resetActivityFromHere = async (activity: ActivityRow) => {
@@ -253,13 +255,15 @@ export function WorkflowRunPage({
         <Card>
           <CardHeader className="pb-1">
             <CardTitle>
-              <button
-                type="button"
-                onClick={() => setTimelineOpen((o) => !o)}
-                className="flex w-full cursor-pointer items-center justify-between text-left"
-                aria-expanded={timelineOpen}
-              >
-                <span>Flow</span>
+              <div className="flex w-full items-center justify-between text-left">
+                <button
+                  type="button"
+                  onClick={() => setTimelineOpen((o) => !o)}
+                  className="cursor-pointer font-semibold hover:text-kumo-link"
+                  aria-expanded={timelineOpen}
+                >
+                  Flow
+                </button>
                 <span className="flex items-center gap-2">
                   <span className="text-[11px] font-normal text-kumo-subtle">
                     {data.activities.length} activities
@@ -273,8 +277,7 @@ export function WorkflowRunPage({
                       type="button"
                       aria-pressed={view === "graph"}
                       className={`cursor-pointer px-2 py-0.5 ${view === "graph" ? "bg-kumo-tint text-kumo-default" : "text-kumo-subtle hover:bg-kumo-tint"}`}
-                      onClick={(e) => {
-                        e.stopPropagation()
+                      onClick={() => {
                         setTimelineOpen(true)
                         setView("graph")
                       }}
@@ -285,8 +288,7 @@ export function WorkflowRunPage({
                       type="button"
                       aria-pressed={view === "timeline"}
                       className={`cursor-pointer px-2 py-0.5 ${view === "timeline" ? "bg-kumo-tint text-kumo-default" : "text-kumo-subtle hover:bg-kumo-tint"}`}
-                      onClick={(e) => {
-                        e.stopPropagation()
+                      onClick={() => {
                         setTimelineOpen(true)
                         setView("timeline")
                       }}
@@ -296,7 +298,7 @@ export function WorkflowRunPage({
                   </span>
                   <span className="font-normal">{timelineOpen ? "hide" : "show"}</span>
                 </span>
-              </button>
+              </div>
             </CardTitle>
           </CardHeader>
           {timelineOpen && (

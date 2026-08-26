@@ -35,8 +35,33 @@ export interface FacetsApi<T> {
   hasActive: boolean
 }
 
+function readFacetState<T>(defs: ReadonlyArray<FacetDef<T>>): Record<string, string[]> {
+  if (typeof window === "undefined") return {}
+  const raw = window.location.hash.slice(1)
+  const query = raw.indexOf("?") === -1 ? "" : raw.slice(raw.indexOf("?") + 1)
+  const params = new URLSearchParams(query)
+  return Object.fromEntries(defs.flatMap((def) => {
+    const values = params.getAll(`facet_${def.key}`)
+    return values.length > 0 ? [[def.key, values]] : []
+  }))
+}
+
+function writeFacetState<T>(defs: ReadonlyArray<FacetDef<T>>, active: Record<string, string[]>) {
+  if (typeof window === "undefined") return
+  const raw = window.location.hash.slice(1) || "/overview"
+  const q = raw.indexOf("?")
+  const path = q === -1 ? raw : raw.slice(0, q)
+  const params = new URLSearchParams(q === -1 ? "" : raw.slice(q + 1))
+  for (const def of defs) {
+    params.delete(`facet_${def.key}`)
+    for (const value of active[def.key] ?? []) params.append(`facet_${def.key}`, value)
+  }
+  const query = params.toString()
+  window.history.replaceState(null, "", `#${path}${query ? `?${query}` : ""}`)
+}
+
 export function useFacets<T>(rows: readonly T[], defs: ReadonlyArray<FacetDef<T>>): FacetsApi<T> {
-  const [active, setActive] = React.useState<Record<string, string[]>>({})
+  const [active, setActive] = React.useState<Record<string, string[]>>(() => readFacetState(defs))
 
   const filtered = React.useMemo(() => {
     // tolerate non-array data while a page's first fetch resolves or a backend degrades
@@ -51,15 +76,25 @@ export function useFacets<T>(rows: readonly T[], defs: ReadonlyArray<FacetDef<T>
     setActive((prev) => {
       const current = prev[key] ?? []
       const next = current.includes(value) ? current.filter((v) => v !== value) : [...current, value]
-      return { ...prev, [key]: next }
+      const nextState = { ...prev, [key]: next }
+      writeFacetState(defs, nextState)
+      return nextState
     })
-  }, [])
+  }, [defs])
 
-  const clear = React.useCallback((key: string) => {
-    setActive((prev) => ({ ...prev, [key]: [] }))
-  }, [])
+  const clear = React.useCallback((key: string) => setActive((prev) => {
+    const next = { ...prev, [key]: [] }
+    writeFacetState(defs, next)
+    return next
+  }), [defs])
 
-  const clearAll = React.useCallback(() => setActive({}), [])
+  const clearAll = React.useCallback(() => {
+    setActive((prev) => {
+      const next = Object.fromEntries(Object.keys(prev).map((key) => [key, []]))
+      writeFacetState(defs, next)
+      return next
+    })
+  }, [defs])
 
   return { filtered, active, toggle, clear, clearAll, hasActive: Object.values(active).some((v) => v.length > 0) }
 }

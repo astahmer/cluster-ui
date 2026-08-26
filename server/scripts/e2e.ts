@@ -38,7 +38,13 @@ async function check(name: string, path: string, expect: (body: any) => boolean)
 
 async function run() {
   // demo reporter for the 127.0.0.1:9199 seeded runner
-  const demo = spawn("npx", ["tsx", resolve("server/scripts/demo-runner.ts")], { stdio: "ignore" })
+  const demo = spawn(process.execPath, [
+    "--experimental-transform-types",
+    "--no-warnings",
+    "--import",
+    resolve("server/scripts/register-ts-resolve.mjs"),
+    resolve("server/scripts/demo-runner.ts")
+  ], { stdio: "ignore" })
   try {
     // wait for the demo reporter to accept connections (best effort)
     for (let i = 0; i < 20; i++) {
@@ -93,11 +99,27 @@ async function runChecks() {
     Array.isArray(b.rows) && b.rows.length > 0 && typeof b.rows[0].traceId === "string" && b.rows[0].count >= 1)
   const traceRows = await check("trace detail", `/api/traces/${encodeURIComponent(traces.rows[0].traceId)}`,
     (b) => Array.isArray(b.rows) && b.rows.length === traces.rows[0].count && b.rows.every((r: any) => r.traceId === traces.rows[0].traceId))
-  void traceRows
+  // trace SSE must send an initial bounded snapshot without waiting for a second tick
+  const traceStreamRes = await fetch(`http://127.0.0.1:${PORT}/api/traces/${encodeURIComponent(traces.rows[0].traceId)}/events`)
+  const traceReader = traceStreamRes.body?.getReader()
+  const firstChunk = traceReader ? await traceReader.read() : { done: true, value: undefined }
+  const firstText = firstChunk.value ? new TextDecoder().decode(firstChunk.value) : ""
+  const traceSseOk = traceStreamRes.status === 200 && firstText.includes("event: trace") && firstText.includes(traces.rows[0].traceId)
+  console.log(`${traceSseOk ? "✓" : "✗"} trace SSE initial snapshot`)
+  if (!traceSseOk) failures++
+  await traceReader?.cancel()
+  const rangeTraces = await check(
+    "traces time range",
+    `/api/traces?createdAfter=${traces.rows[0].firstAt}&createdBefore=${traces.rows[0].lastAt}`,
+    (b) => Array.isArray(b.rows) && b.rows.length > 0
+  )
+  void rangeTraces
   const wfs = await check("workflows", "/api/workflows", (b) =>
     Array.isArray(b) && b.every((w: any) => "failedRuns" in w))
   const msgs = await check("messages list", "/api/messages?pageSize=5", (b) => b.rows?.length === 5 && b.total > 0)
   await check("messages paging", "/api/messages?page=2&pageSize=5", (b) => b.page === 2 && b.rows.length <= 5)
+  const firstMessageAt = Number(msgs.rows[0]?.createdAt ?? 0)
+  await check("messages time range", `/api/messages?createdAfter=${firstMessageAt}&createdBefore=${firstMessageAt}`, (b) => b.total >= 1 && b.rows.every((r: any) => r.createdAt === firstMessageAt))
   await check("messages filter done", "/api/messages?status=done", (b) => b.rows.every((r: any) => r.status === "done"))
   const failedList = await check("messages filter failed", "/api/messages?failed=true&pageSize=5", (b) =>
     b.total >= 1 && b.rows.every((r: any) => r.failed === true))
@@ -458,7 +480,7 @@ async function runChecks() {
         if (queueJobs?.rows?.[0]?.id) {
           const jobDetailRes = await fetch(`http://127.0.0.1:${R_PORT}/api/queue-jobs/${encodeURIComponent(queueJobs.rows[0].id)}?cluster=local-redis`)
           const jobDetail = await jobDetailRes.json().catch(() => null)
-          const jobDetailOk = jobDetailRes.status === 200 && jobDetail.id === queueJobs.rows[0].id && "attemptsMade" in jobDetail
+          const jobDetailOk = jobDetailRes.status === 200 && jobDetail.id === queueJobs.rows[0].id && jobDetail.state === "completed" && "attemptsMade" in jobDetail
           console.log(`${jobDetailOk ? "✓" : "✗"} redis queue job detail`)
           if (!jobDetailOk) failures++
         }

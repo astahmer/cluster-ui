@@ -53,6 +53,8 @@ export interface MessagesInitialFilters {
   /** "true" opens the Failed tab */
   failed?: string
   q?: string
+  createdAfter?: string
+  createdBefore?: string
 }
 
 /* -------------------------------------------------------------------- page -- */
@@ -76,8 +78,8 @@ export function MessagesPage({
   const [debouncedQ, setDebouncedQ] = React.useState("")
   // P2-19 collapsible filters
   const [showFilters, setShowFilters] = React.useState(false)
-  const [createdAfter, setCreatedAfter] = React.useState("")
-  const [createdBefore, setCreatedBefore] = React.useState("")
+  const [createdAfter, setCreatedAfter] = React.useState(initialFilters?.createdAfter ?? "")
+  const [createdBefore, setCreatedBefore] = React.useState(initialFilters?.createdBefore ?? "")
 
   // P2-19: number of collapsed filters currently active (drives the badge)
   const activeFilterCount = [entityType, entityId, createdAfter, createdBefore].filter((v) => v !== "").length
@@ -105,7 +107,7 @@ export function MessagesPage({
 
   const config = useAppConfig()
   const readonly = config?.readonly === true || config?.role === "viewer"
-  const detail = useMessageDetail(openId)
+  const detailState = useMessageDetail(openId)
   useEscToClose(() => setOpenId(null))
   // stop background polling while the detail panel is open so it doesn't rerender under the cursor
   usePauseWhile(openId !== null)
@@ -118,13 +120,17 @@ export function MessagesPage({
     setStatus(nextStatus)
     setTab(initialFilters?.failed === "true" ? "failed" : nextStatus)
     setQ(initialFilters?.q ?? "")
+    setCreatedAfter(initialFilters?.createdAfter ?? "")
+    setCreatedBefore(initialFilters?.createdBefore ?? "")
     setPage(1)
   }, [
     initialFilters?.entityType,
     initialFilters?.entityId,
     initialFilters?.status,
     initialFilters?.failed,
-    initialFilters?.q
+    initialFilters?.q,
+    initialFilters?.createdAfter,
+    initialFilters?.createdBefore
   ])
 
   React.useEffect(() => {
@@ -230,7 +236,6 @@ export function MessagesPage({
     const ids = [...selected]
     if (ids.length === 0 || bulkBusy) return
     const label = action === "delete" ? "Delete" : "Retry"
-    setBulkBusy(true)
     if (
       !(await confirmDialog({
         title: `${label} ${ids.length} message${ids.length === 1 ? "" : "s"}?`,
@@ -243,8 +248,9 @@ export function MessagesPage({
       }))
     )
       return
+    setBulkBusy(true)
     try {
-      const results = await api.bulkActions(action, ids)
+      const { results } = await api.bulkActions(action, ids)
       const okCount = results.filter((r) => r.ok).length
       setActionError(null)
       if (okCount === results.length) toast.success(`${label}: ${okCount}/${results.length} done`)
@@ -497,10 +503,15 @@ export function MessagesPage({
         onClose={() => setOpenId(null)}
         title={<span className="font-mono text-xs">message {openId && shortId(openId)}</span>}
       >
-        {detail === null ? (
+        {detailState.error ? (
+          <div className="space-y-2 text-kumo-danger">
+            <div>{detailState.error}</div>
+            <Button size="sm" variant="secondary" onClick={detailState.retry}>Retry</Button>
+          </div>
+        ) : detailState.detail === null ? (
           <div className="text-kumo-subtle">loading…</div>
         ) : (
-          <MessageDetailBody d={detail} config={config} onAction={runAction} onChanged={refresh} />
+          <MessageDetailBody d={detailState.detail} config={config} onAction={runAction} onChanged={refresh} />
         )}
       </DetailPanel>
     </div>

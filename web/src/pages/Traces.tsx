@@ -4,7 +4,7 @@ import { api, type Message, type TraceSummary } from "../api.ts"
 import { Badge, Button, Input, Table, TBody, TD, TH, THead, TR } from "../components/ui.tsx"
 import { DetailPanel, SkeletonTable, StatusBadge, rowInteractions, Pager } from "../components/pieces.tsx"
 import { SpanWaterfall, type TimelineSpan } from "../components/timeline.tsx"
-import { ErrorNote, PageHeader, useEscToClose, useLive } from "../shell.tsx"
+import { ErrorNote, PageHeader, useCluster, useEscToClose, useLive } from "../shell.tsx"
 import { Empty } from "../kumo"
 import { fmtTime } from "../format.ts"
 import { useExport } from "../export.ts"
@@ -17,13 +17,19 @@ import { useExport } from "../export.ts"
  * (see docs/ROADMAP.md §4).
  */
 
-export function TracesPage() {
+export function TracesPage({
+  initialFilters
+}: {
+  initialFilters?: { createdAfter?: string; createdBefore?: string }
+}) {
   const [rows, setRows] = React.useState<TraceSummary[] | null>(null)
   const [total, setTotal] = React.useState(0)
   // P1-15: trace-id substring search + offset paging
   const [search, setSearch] = React.useState("")
   const [debouncedSearch, setDebouncedSearch] = React.useState("")
   const [page, setPage] = React.useState(1)
+  const [createdAfter, setCreatedAfter] = React.useState(initialFilters?.createdAfter ?? "")
+  const [createdBefore, setCreatedBefore] = React.useState(initialFilters?.createdBefore ?? "")
   const pageSize = 50
   const [openTraceId, setOpenTraceId] = React.useState<string | null>(null)
 
@@ -39,12 +45,14 @@ export function TracesPage() {
     const res = await api.traces({
       limit: pageSize,
       offset: (page - 1) * pageSize,
-      search: debouncedSearch || undefined
+      search: debouncedSearch || undefined,
+      createdAfter: parseEpoch(createdAfter),
+      createdBefore: parseEpoch(createdBefore)
     })
     setRows(res.rows)
     setTotal(res.total)
     // refetch when paging or searching, not just on the poll interval
-  }, [page, debouncedSearch])
+  }, [page, debouncedSearch, createdAfter, createdBefore])
 
   useEscToClose(() => setOpenTraceId(null))
 
@@ -89,6 +97,16 @@ export function TracesPage() {
         <span className="text-[12px] text-kumo-subtle">click a trace for its waterfall</span>
       </PageHeader>
       <ErrorNote error={error} onRetry={refresh} />
+      {(createdAfter || createdBefore) && (
+        <div className="mb-2 flex flex-wrap items-center gap-2 text-[12px] text-kumo-subtle">
+          <span>time brush: {createdAfter ? fmtTime(Number(createdAfter)) : "…"} → {createdBefore ? fmtTime(Number(createdBefore)) : "…"}</span>
+          <Button variant="ghost" size="sm" onClick={() => {
+            setCreatedAfter("")
+            setCreatedBefore("")
+            window.location.hash = "#/traces"
+          }}>clear range</Button>
+        </div>
+      )}
       {/* accurate window driven by server total instead of a silent cap (P1-15) */}
       {total > 0 && (
         <p className="mb-2 text-[12px] text-kumo-subtle">
@@ -215,6 +233,9 @@ export function TraceDetailPage({ traceId }: { traceId: string }) {
 function TraceDetailBody({ traceId, compact }: { traceId: string; compact?: boolean }) {
   const [rows, setRows] = React.useState<Message[] | null>(null)
   const [error, setError] = React.useState<string | null>(null)
+  const [streamState, setStreamState] = React.useState<"connecting" | "live" | "polling">("connecting")
+  const [lastUpdated, setLastUpdated] = React.useState<number | null>(null)
+  const cluster = useCluster()
   const { refresh } = useLive(async () => {
     try {
       const res = await api.trace(traceId)
@@ -223,7 +244,53 @@ function TraceDetailBody({ traceId, compact }: { traceId: string; compact?: bool
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
-  }, [traceId])
+  }, [traceId], streamState !== "live")
+  const refreshRef = React.useRef(refresh)
+  refreshRef.current = refresh
+
+  React.useEffect(() => {
+    if (typeof EventSource === "undefined") {
+      setStreamState("polling")
+      return
+    }
+    const source = new EventSource(api.traceEventsUrl(traceId))
+    const onTrace = (event: Event) => {
+      try {
+        const body = JSON.parse((event as MessageEvent).data) as { rows?: unknown; sentAt?: number }
+        if (!Array.isArray(body.rows)) throw new Error("invalid trace stream payload")
+        setRows(body.rows as Message[])
+        setLastUpdated(typeof body.sentAt === "number" ? body.sentAt : Date.now())
+        setError(null)
+      } catch {
+        // malformed frames are ignored; the next frame or polling fallback remains authoritative
+      }
+    }
+    const onTraceError = (event: Event) => {
+      source.close()
+      setStreamState("polling")
+      try {
+        const body = JSON.parse((event as MessageEvent).data) as { error?: unknown }
+        setError(typeof body.error === "string" ? body.error : "live trace stream failed; using polling")
+      } catch {
+        setError("live trace stream failed; using polling")
+      }
+      refreshRef.current()
+    }
+    source.addEventListener("trace", onTrace)
+    source.addEventListener("trace-error", onTraceError)
+    source.onopen = () => setStreamState("live")
+    source.onerror = () => {
+      source.close()
+      setStreamState("polling")
+      setError((previous) => previous ?? "live trace stream unavailable; using polling")
+      refreshRef.current()
+    }
+    return () => {
+      source.removeEventListener("trace", onTrace)
+      source.removeEventListener("trace-error", onTraceError)
+      source.close()
+    }
+  }, [traceId, cluster])
 
   const spans = toSpans(rows ?? [])
   const totalMs = spans.length >= 2 ? Math.max(...spans.map((s) => s.endMs)) - Math.min(...spans.map((s) => s.startMs)) : 0
@@ -243,6 +310,12 @@ function TraceDetailBody({ traceId, compact }: { traceId: string; compact?: bool
           <div className="mb-2 flex items-center justify-between text-[11px] text-kumo-subtle">
             <span>
               waterfall — {formatDuration(totalMs)} total · {rows.length} spans
+            </span>
+            <span className="flex items-center gap-1.5">
+              <Badge tone={streamState === "live" ? "ok" : "neutral"}>
+                {streamState === "live" ? "live" : "polling"}
+              </Badge>
+              {lastUpdated && <span>updated {fmtTime(lastUpdated)}</span>}
             </span>
           </div>
           <SpanWaterfall spans={spans} />
@@ -329,6 +402,12 @@ function traceDurationHint(t: TraceSummary): number {
 
 function shortId(id: string): string {
   return id.length > 16 ? `${id.slice(0, 13)}…` : id
+}
+
+function parseEpoch(value: string): number | undefined {
+  if (!value.trim()) return undefined
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : undefined
 }
 
 function formatDuration(ms: number): string {

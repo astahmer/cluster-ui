@@ -66,7 +66,16 @@ function notify() {
 
 function startFallback() {
   if (fallbackTimer !== null) return
-  fallbackTimer = setInterval(notify, 4000)
+  fallbackTimer = setInterval(() => {
+    notify()
+    // Keep polling while periodically retrying SSE. Clearing this timer before
+    // connect() avoids the non-null guard turning fallback into a permanent mode.
+    if (source === null) {
+      clearInterval(fallbackTimer!)
+      fallbackTimer = null
+      connect()
+    }
+  }, 4000)
 }
 
 function connect() {
@@ -182,7 +191,7 @@ export interface LiveHandle {
   refresh: () => void
 }
 
-export function useLive(fetcher: () => Promise<unknown>, deps: unknown[] = []): LiveHandle {
+export function useLive(fetcher: () => Promise<unknown>, deps: unknown[] = [], enabled = true): LiveHandle {
   const [loading, setLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
   const [tick, setTick] = React.useState(0)
@@ -191,6 +200,7 @@ export function useLive(fetcher: () => Promise<unknown>, deps: unknown[] = []): 
   fetchRef.current = fetcher
 
   React.useEffect(() => {
+    if (!enabled) return
     let alive = true
     const load = async () => {
       try {
@@ -219,7 +229,7 @@ export function useLive(fetcher: () => Promise<unknown>, deps: unknown[] = []): 
       subscribers.delete(load)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [...deps, tick])
+  }, [enabled, ...deps, tick])
 
   return { loading, error, refresh: () => setTick((t) => t + 1) }
 }

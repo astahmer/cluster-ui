@@ -1,9 +1,9 @@
 import * as React from "react"
 import { api, type MetricPoint, type Overview } from "../api.ts"
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui.tsx"
-import { Sparkline } from "../components/sparkline.tsx"
+import { Sparkline, type SparklineBrushRange } from "../components/sparkline.tsx"
 import { SkeletonCards, SkeletonTable, StatCard } from "../components/pieces.tsx"
-import { Badge } from "../components/ui.tsx"
+import { Badge, Button } from "../components/ui.tsx"
 import { ErrorNote, PageHeader, useLive } from "../shell.tsx"
 import { Banner, Tabs } from "../kumo"
 
@@ -18,6 +18,7 @@ export function OverviewPage() {
   const [data, setData] = React.useState<Overview | null>(null)
   const [history, setHistory] = React.useState<MetricPoint[]>([])
   const [rangeMs, setRangeMs] = React.useState(RANGES[0].ms)
+  const [brushRange, setBrushRange] = React.useState<SparklineBrushRange | null>(null)
 
   const loadOverview = React.useRef(async () => setData(await api.overview()))
   const loadHistoryRef = React.useRef<(ms: number) => Promise<void>>(async (ms: number) => {
@@ -111,17 +112,27 @@ export function OverviewPage() {
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-5">
-            <MetricSeries label="Pending depth" tone="accent" history={history} pick={(p) => p.pending} />
-            <MetricSeries label="In-flight" tone="info" history={history} pick={(p) => p.inflight} />
-            <MetricSeries label="Failed" tone="err" history={history} pick={(p) => p.failed} />
+            <MetricSeries label="Pending depth" tone="accent" history={history} pick={(p) => p.pending} onBrush={setBrushRange} brushRange={brushRange} />
+            <MetricSeries label="In-flight" tone="info" history={history} pick={(p) => p.inflight} onBrush={setBrushRange} brushRange={brushRange} />
+            <MetricSeries label="Failed" tone="err" history={history} pick={(p) => p.failed} onBrush={setBrushRange} brushRange={brushRange} />
             <MetricSeries
               label="Unassigned shards"
               tone="warn"
               history={history}
               pick={(p) => p.unassignedShards}
+              onBrush={setBrushRange}
+              brushRange={brushRange}
             />
-            <FailureRate history={history} />
+            <FailureRate history={history} onBrush={setBrushRange} brushRange={brushRange} />
           </div>
+          {brushRange && (
+            <div className="mt-4 flex flex-wrap items-center gap-2 rounded-md border border-kumo-brand/30 bg-kumo-tint/40 px-3 py-2 text-[12px]">
+              <span>Selected {new Date(brushRange.from).toLocaleString()} → {new Date(brushRange.to).toLocaleString()}</span>
+              <a className="text-kumo-link underline-offset-2 hover:underline" href={`#/messages?createdAfter=${brushRange.from}&createdBefore=${brushRange.to}`}>Messages</a>
+              <a className="text-kumo-link underline-offset-2 hover:underline" href={`#/traces?createdAfter=${brushRange.from}&createdBefore=${brushRange.to}`}>Traces</a>
+              <Button variant="ghost" size="sm" onClick={() => setBrushRange(null)}>clear range</Button>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -233,12 +244,16 @@ function MetricSeries({
   label,
   tone,
   history,
-  pick
+  pick,
+  onBrush,
+  brushRange
 }: {
   label: string
   tone: "accent" | "info" | "err" | "warn"
   history: MetricPoint[]
   pick: (p: MetricPoint) => number
+  onBrush: (range: SparklineBrushRange) => void
+  brushRange: SparklineBrushRange | null
 }) {
   return (
     <div className="min-w-0">
@@ -251,12 +266,22 @@ function MetricSeries({
         points={history.map((p) => ({ t: p.t, v: pick(p) }))}
         tone={tone}
         height={96}
+        onBrush={onBrush}
+        brushRange={brushRange}
       />
     </div>
   )
 }
 
-function FailureRate({ history }: { history: MetricPoint[] }) {
+function FailureRate({
+  history,
+  onBrush,
+  brushRange
+}: {
+  history: MetricPoint[]
+  onBrush: (range: SparklineBrushRange) => void
+  brushRange: SparklineBrushRange | null
+}) {
   const points = history
     .filter((p) => p.done + p.failed > 0)
     .map((p) => ({ t: p.t, v: (p.failed / (p.done + p.failed)) * 100 }))
@@ -274,6 +299,8 @@ function FailureRate({ history }: { history: MetricPoint[] }) {
         tone={latest > 5 ? "err" : "ok"}
         height={96}
         formatValue={(v) => v.toFixed(1) + "%"}
+        onBrush={onBrush}
+        brushRange={brushRange}
       />
     </div>
   )

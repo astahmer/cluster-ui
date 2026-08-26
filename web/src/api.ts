@@ -480,7 +480,7 @@ export const api = {
       )}`
     ),
   crons: () => get<CronJob[]>("/api/crons"),
-  traces: (q?: { limit?: number; offset?: number; search?: string; cluster?: string }) =>
+  traces: (q?: { limit?: number; offset?: number; search?: string; createdAfter?: number; createdBefore?: number; cluster?: string }) =>
     get<TraceList>(
       "/api/traces?" +
         new URLSearchParams(
@@ -488,6 +488,8 @@ export const api = {
             limit: q?.limit,
             offset: q?.offset,
             q: q?.search,
+            createdAfter: q?.createdAfter,
+            createdBefore: q?.createdBefore,
             cluster: q?.cluster
           }).filter(([, v]) => v !== undefined && v !== "") as Array<[string, string]>
         ).toString()
@@ -524,6 +526,8 @@ export const api = {
   jobTree: (id: string) => get<JobTreeNode>(`/api/job-tree/${encodeURIComponent(id)}`),
   trace: (traceId: string) =>
     get<{ traceId: string; rows: Message[] }>(`/api/traces/${encodeURIComponent(traceId)}`),
+  traceEventsUrl: (traceId: string) =>
+    withCluster(`/api/traces/${encodeURIComponent(traceId)}/events`),
   singletons: () => get<{ runners: RunnerReport[] }>("/api/singletons"),
   metricsHistory: (opts?: { rangeMs?: number }) =>
     get<MetricPoint[]>(
@@ -555,7 +559,8 @@ export const api = {
       `/api/workflows/${encodeURIComponent(name)}/${encodeURIComponent(executionId)}`
     ),
 
-  retryMessage: (messageId: string) => post<{ ok: true }>("/api/actions/retry", { messageId }),
+  retryMessage: (messageId: string, cluster?: string) =>
+    post<{ ok: true }>("/api/actions/retry", { messageId, ...(cluster ? { cluster } : {}) }),
   interruptMessage: (messageId: string) => post<{ ok: true }>("/api/actions/interrupt", { messageId }),
   resetActivity: (messageId: string) =>
     post<{ ok: true }>("/api/actions/reset-activity", { messageId }),
@@ -563,7 +568,7 @@ export const api = {
 
   /** Apply an action to many messages at once; per-id results, batch never hard-fails. */
   bulkActions: (action: BulkActionKind, ids: ReadonlyArray<string>) =>
-    post<BulkActionResult[]>("/api/actions/bulk", { ids: [...ids], action }),
+    post<{ results: BulkActionResult[] }>("/api/actions/bulk", { ids: [...ids], action }),
 
   login: (token: string) => post<AuthResponse>("/api/auth", { token })
 }

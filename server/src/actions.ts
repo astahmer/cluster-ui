@@ -43,12 +43,13 @@ interface TargetRow {
   readonly entity_type: string
   readonly entity_id: string
   readonly kind: number
+  readonly tag: string | null
 }
 
 function findMessage(db: Database.Database, tables: { messages: string }, messageId: string): TargetRow {
   const row = db
     .prepare(
-      `SELECT CAST(id AS TEXT) as idText, shard_id, entity_type, entity_id, kind FROM ${tables.messages} WHERE CAST(id AS TEXT) = ?`
+      `SELECT CAST(id AS TEXT) as idText, shard_id, entity_type, entity_id, kind, tag FROM ${tables.messages} WHERE CAST(id AS TEXT) = ?`
     )
     .get(messageId) as TargetRow | undefined
   if (!row) {
@@ -80,7 +81,7 @@ export function retryMessage(db: Database.Database, prefix: string, messageId: s
 export function resetActivity(db: Database.Database, prefix: string, messageId: string): { ok: true } {
   const t = { messages: `${prefix}_messages`, replies: `${prefix}_replies` }
   const target = findMessage(db, t, messageId)
-  if (!target.entity_type.startsWith("Workflow/")) {
+  if (!target.entity_type.startsWith("Workflow/") || target.tag === "run") {
     throw new ActionError("message is not a workflow activity", 400)
   }
   const tx = db.transaction(() => {

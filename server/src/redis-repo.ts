@@ -39,6 +39,7 @@ interface RawJob {
   timestamp: number | null
   processedOn: number | null
   finishedOn: number | null
+  deliverAt: number | null
 }
 
 export function makeRedisRepo(url: string): import("./queries.ts").Repo {
@@ -101,6 +102,7 @@ export function makeRedisRepo(url: string): import("./queries.ts").Repo {
     } catch {
       returnValue = raw.returnvalue ?? null
     }
+    const deliverAt = state === "delayed" ? Number(await withTimeout(redis.zscore(`bull:${queue}:delayed`, jobId))) : null
     return {
       queue,
       jobId,
@@ -120,7 +122,8 @@ export function makeRedisRepo(url: string): import("./queries.ts").Repo {
       attemptsMade: Number(raw.attemptsMade ?? 0),
       timestamp: raw.timestamp ? Number(raw.timestamp) : null,
       processedOn: raw.processedOn ? Number(raw.processedOn) : null,
-      finishedOn: raw.finishedOn ? Number(raw.finishedOn) : null
+      finishedOn: raw.finishedOn ? Number(raw.finishedOn) : null,
+      deliverAt: Number.isFinite(deliverAt) ? deliverAt : null
     }
   }
 
@@ -187,7 +190,7 @@ export function makeRedisRepo(url: string): import("./queries.ts").Repo {
     traceId: null,
     processed: j.state === "completed",
     lastRead: j.processedOn ? new Date(j.processedOn).toISOString().slice(0, 19).replace("T", " ") : null,
-    deliverAt: null,
+    deliverAt: j.deliverAt,
     createdAt: j.timestamp ?? 0,
     status: statusOf(j.state),
     failed: j.state === "failed",
@@ -203,6 +206,10 @@ export function makeRedisRepo(url: string): import("./queries.ts").Repo {
       if (query.status) rows = rows.filter((r) => r.status === query.status)
       if (query.entityType) rows = rows.filter((r) => r.entityType === query.entityType)
       if (query.entityId) rows = rows.filter((r) => r.entityId === query.entityId)
+      if (query.failed === true || query.failed === "true") rows = rows.filter((r) => r.failed)
+      if (query.failed === false || query.failed === "false") rows = rows.filter((r) => !r.failed)
+      if (query.createdAfter !== undefined) rows = rows.filter((r) => r.createdAt >= query.createdAfter!)
+      if (query.createdBefore !== undefined) rows = rows.filter((r) => r.createdAt <= query.createdBefore!)
       if (query.q) {
         const q = query.q.toLowerCase()
         rows = rows.filter(
@@ -212,7 +219,7 @@ export function makeRedisRepo(url: string): import("./queries.ts").Repo {
             r.id.toLowerCase().includes(q)
         )
       }
-      rows.sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id))
+      rows.sort((a, b) => query.sort === "deliverAt" ? (b.deliverAt ?? 0) - (a.deliverAt ?? 0) || b.createdAt - a.createdAt : b.createdAt - a.createdAt || b.id.localeCompare(a.id))
       const pageSize = Math.min(Math.max(query.pageSize ?? 50, 1), 200)
       const page = Math.max(query.page ?? 1, 1)
       return {
@@ -244,30 +251,41 @@ export function makeRedisRepo(url: string): import("./queries.ts").Repo {
       }
     })
 
-  const overview = () =>
-    collectJobs(SCAN_WINDOW).then((jobs) => {
-      const counts = { pending: 0, inflight: 0, scheduled: 0, done: 0, failed: 0 }
-      const perQueue = new Map<string, number>()
-      for (const j of jobs) {
-        // failed jobs keep their own bucket even though view status is "done"
-        if (j.state === "failed") counts.failed++
-        else counts[statusOf(j.state) as keyof typeof counts]++
-        perQueue.set(j.queue, (perQueue.get(j.queue) ?? 0) + 1)
-      }
-      const topEntities = [...perQueue.entries()]
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 8)
-        .map(([entityType, total]) => ({ entityType, total, active: 0 }))
-      return {
-        messages: counts,
-        runners: { total: 0 },
-        shards: { total: 0, assigned: 0 },
-        unassignedShards: 0,
-        topEntities,
-        topWorkflows: [],
-        serverTime: Date.now()
-      }
-    })
+  const overview = async () => {
+    const queues = await scanQueues()
+    const counts = { pending: 0, inflight: 0, scheduled: 0, done: 0, failed: 0 }
+    const perQueue = new Map<string, number>()
+    await Promise.all(queues.map(async (queue) => {
+      const [waiting, paused, active, delayed, completed, failed] = await Promise.all([
+        withTimeout(redis.llen(`bull:${queue}:wait`)),
+        withTimeout(redis.llen(`bull:${queue}:paused`)),
+        withTimeout(redis.llen(`bull:${queue}:active`)),
+        withTimeout(redis.zcard(`bull:${queue}:delayed`)),
+        withTimeout(redis.zcard(`bull:${queue}:completed`)),
+        withTimeout(redis.zcard(`bull:${queue}:failed`))
+      ])
+      const pending = waiting + paused
+      counts.pending += pending
+      counts.inflight += active
+      counts.scheduled += delayed
+      counts.done += completed
+      counts.failed += failed
+      perQueue.set(queue, pending + active + delayed + completed + failed)
+    }))
+    const topEntities = [...perQueue.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8)
+      .map(([entityType, total]) => ({ entityType, total, active: 0 }))
+    return {
+      messages: counts,
+      runners: { total: 0 },
+      shards: { total: 0, assigned: 0 },
+      unassignedShards: 0,
+      topEntities,
+      topWorkflows: [],
+      serverTime: Date.now()
+    }
+  }
 
   const entities = () =>
     collectJobs(SCAN_WINDOW).then((jobs) => {
@@ -319,7 +337,17 @@ export function makeRedisRepo(url: string): import("./queries.ts").Repo {
     const [queue, jobId] = splitId(id)
     await ready()
     for (const state of STATES) {
+      const member = state === "completed" || state === "failed" || state === "delayed" ?
+        await withTimeout(redis.zscore(`bull:${queue}:${state}`, jobId)) :
+        await withTimeout(redis.lpos(`bull:${queue}:${state === "wait" ? "wait" : state}`, jobId))
+      if (member === null) continue
       const job = await fetchJob(queue, jobId, state)
+      if (job) return toJobView(job)
+    }
+    // A paused queue stores waiting jobs under `paused`, but presents them as wait.
+    const paused = await withTimeout(redis.lpos(`bull:${queue}:paused`, jobId))
+    if (paused !== null) {
+      const job = await fetchJob(queue, jobId, "wait")
       if (job) return toJobView(job)
     }
     return null
@@ -330,10 +358,11 @@ export function makeRedisRepo(url: string): import("./queries.ts").Repo {
       assertWritable(config.readonly)
       const [queue, jobId] = splitId(id)
       await ready()
-      // best-effort: move from failed back to wait
-      await withTimeout(
-        redis.zrem(`bull:${queue}:failed`, jobId).then(() => redis.lpush(`bull:${queue}:wait`, jobId))
-      )
+      // Only failed jobs can be retried. Removing the membership first avoids
+      // duplicating pending/active/delayed jobs in Bull's state structures.
+      const removed = await withTimeout(redis.zrem(`bull:${queue}:failed`, jobId))
+      if (removed !== 1) throw new ActionError(`job ${id} is not failed`, 400)
+      await withTimeout(redis.lpush(`bull:${queue}:wait`, jobId))
       return { ok: true as const }
     },
     async delete(id: string) {
@@ -526,7 +555,8 @@ export function makeRedisRepo(url: string): import("./queries.ts").Repo {
         attemptsMade: Number(raw.attemptsMade ?? 0),
         timestamp: raw.timestamp ? Number(raw.timestamp) : null,
         processedOn: raw.processedOn ? Number(raw.processedOn) : null,
-        finishedOn: raw.finishedOn ? Number(raw.finishedOn) : null
+        finishedOn: raw.finishedOn ? Number(raw.finishedOn) : null,
+        deliverAt: null
       })
       const node: Record<string, unknown> = { job: view, children: [] }
       if (depth < 8) {
