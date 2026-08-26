@@ -114,11 +114,16 @@ export function DetailPanel({
   title: React.ReactNode
   children: React.ReactNode
 }) {
+  const panelRef = useDialogA11y(open)
   if (!open) return null
   return (
     <div className="fixed inset-0 z-40 flex justify-end bg-black/40" onClick={onClose}>
       <div
-        className="flex h-full w-full max-w-xl flex-col overflow-y-auto border-l border-kumo-line bg-kumo-base p-4 shadow-xl"
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        tabIndex={-1}
+        className="flex h-full w-full max-w-xl flex-col overflow-y-auto border-l border-kumo-line bg-kumo-base p-4 shadow-xl focus:outline-none"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-3 flex items-center justify-between">
@@ -280,6 +285,81 @@ export function SortableTh({
 
 /** Sticky-header classes for plain (non-sortable) TH cells. */
 export const STICKY_TH = "sticky top-0 z-10 bg-kumo-base"
+
+/**
+ * Dialog a11y for custom overlay panels (UX review P1-6c/P2-14): role=dialog,
+ * aria-modal, Tab focus trap, initial focus, focus restore on close, and body
+ * scroll lock. Attach the returned ref to the panel content element.
+ */
+export function useDialogA11y(active: boolean) {
+  const ref = React.useRef<HTMLDivElement | null>(null)
+  const restoreTo = React.useRef<HTMLElement | null>(null)
+
+  React.useEffect(() => {
+    if (!active) return
+    const node = ref.current
+    restoreTo.current = document.activeElement as HTMLElement | null
+
+    const focusables = () => {
+      if (!node) return []
+      return Array.from(
+        node.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      ).filter((el) => el.offsetWidth > 0 || el.offsetHeight > 0)
+    }
+    ;(focusables()[0] ?? node)?.focus()
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Tab" || !node) return
+      const list = focusables()
+      if (list.length === 0) {
+        e.preventDefault()
+        return
+      }
+      const first = list[0]
+      const last = list[list.length - 1]
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault()
+        last.focus()
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener("keydown", onKey, true)
+
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    return () => {
+      document.removeEventListener("keydown", onKey, true)
+      document.body.style.overflow = prevOverflow
+      restoreTo.current?.focus?.()
+    }
+  }, [active])
+
+  return ref
+}
+
+/** Spread onto clickable table rows so keyboard users can open them (P1-6b). */
+export function rowInteractions(onOpen: () => void): {
+  tabIndex: number
+  role: string
+  onClick: () => void
+  onKeyDown: (e: React.KeyboardEvent) => void
+} {
+  return {
+    tabIndex: 0,
+    role: "button",
+    onClick: onOpen,
+    onKeyDown: (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault()
+        onOpen()
+      }
+    }
+  }
+}
 
 /**
  * Deep-linkable filter state backed by the hash query string (#/path?key=value).

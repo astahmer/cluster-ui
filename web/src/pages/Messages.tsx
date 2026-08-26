@@ -9,7 +9,7 @@ import {
 } from "../api.ts"
 import { Trash, XCircle } from "@phosphor-icons/react"
 import { downloadCsv, downloadJson } from "../export.ts"
-import { DetailPanel, SkeletonTable, StatusBadge, statusTone, useMessageDetail } from "../components/pieces.tsx"
+import { DetailPanel, SkeletonTable, StatusBadge, statusTone, rowInteractions, useMessageDetail } from "../components/pieces.tsx"
 import { FilterBar, useFacets, type FacetDef } from "../components/filters/index.tsx"
 import { FlowGraph, jobTreeToSpecs } from "../components/flow-graph.tsx"
 import { confirmDialog } from "../components/dialogs.tsx"
@@ -511,7 +511,11 @@ function MessageRow({
       null
 
   return (
-    <TR className="cursor-pointer" onClick={onOpen} data-selected={selected || undefined}>
+    <TR
+      className="cursor-pointer"
+      data-selected={selected || undefined}
+      {...rowInteractions(onOpen)}
+    >
       <KumoTable.CheckCell
         aria-label={selected ? "deselect message" : "select message"}
         checked={selected}

@@ -2,7 +2,7 @@ import * as React from "react"
 import { Stack } from "@phosphor-icons/react"
 import { api, type Message, type TraceSummary } from "../api.ts"
 import { Badge, Table, TBody, TD, TH, THead, TR } from "../components/ui.tsx"
-import { DetailPanel, SkeletonTable, StatusBadge } from "../components/pieces.tsx"
+import { DetailPanel, SkeletonTable, StatusBadge, rowInteractions } from "../components/pieces.tsx"
 import { SpanWaterfall, type TimelineSpan } from "../components/timeline.tsx"
 import { ErrorNote, PageHeader, useEscToClose, useLive } from "../shell.tsx"
 import { Empty } from "../kumo"
@@ -48,7 +48,11 @@ export function TracesPage() {
             {traces.map((t) => {
               const short = t.traceId.length > 16 ? `${t.traceId.slice(0, 13)}…` : t.traceId
               return (
-                <TR key={t.traceId} className="cursor-pointer hover:bg-kumo-recessed/60" onClick={() => setOpenTraceId(t.traceId)}>
+                <TR
+                  key={t.traceId}
+                  className="cursor-pointer hover:bg-kumo-recessed/60"
+                  {...rowInteractions(() => setOpenTraceId(t.traceId))}
+                >
                   <TD>
                     <a
                       href={`#/traces/${encodeURIComponent(t.traceId)}`}

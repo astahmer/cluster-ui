@@ -1,6 +1,6 @@
 import * as React from "react"
 import { api, type MessageStatus, type Workflow, type WorkflowRun } from "../api.ts"
-import { ActivityDot, FilterChip, SkeletonTable, SortableTh, STICKY_TH, useHashParam, useSort } from "../components/pieces.tsx"
+import { ActivityDot, FilterChip, SkeletonTable, SortableTh, STICKY_TH, useDialogA11y, useHashParam, rowInteractions, useSort } from "../components/pieces.tsx"
 import { FilterBar, presenceFacet, useFacets, type FacetDef } from "../components/filters/index.tsx"
 import { Badge, Card, CardContent, Select, Table, TBody, TD, TH, THead, TR } from "../components/ui.tsx"
 import { ErrorNote, PageHeader, useLive } from "../shell.tsx"
@@ -207,7 +207,7 @@ export function WorkflowRunsPage({
                   "cursor-pointer" +
                   (r.failed ? " border-l-2 border-l-kumo-danger hover:bg-kumo-danger/5" : "")
                 }
-                onClick={() => setOpenExecution(r.executionId)}
+                {...rowInteractions(() => setOpenExecution(r.executionId))}
               >
                 <TD
                   className={
@@ -269,10 +269,16 @@ function WorkflowRunDetailModal({
   onClose: () => void
   onChanged?: () => void
 }) {
+  const panelRef = useDialogA11y(true)
   return (
     <div className="fixed inset-0 z-40 flex justify-end bg-black/40" onClick={onClose}>
       <div
-        className="flex h-full w-full max-w-xl flex-col overflow-y-auto border-l border-kumo-line bg-kumo-base p-4 shadow-xl"
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={`${name} / ${executionId}`}
+        tabIndex={-1}
+        className="flex h-full w-full max-w-xl flex-col overflow-y-auto border-l border-kumo-line bg-kumo-base p-4 shadow-xl focus:outline-none"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-3 flex items-center justify-between">

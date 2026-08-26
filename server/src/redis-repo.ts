@@ -378,13 +378,34 @@ export function makeRedisRepo(url: string): import("./queries.ts").Repo {
     }
   }
 
-  /** per-queue paused state for the queues listing */
+  /** per-queue paused state + job counts for the queues listing (UX review P1-3) */
   const queues = () =>
     scanQueues().then(async (names) => {
-      const out: Array<{ name: string; paused: boolean }> = []
+      const out: Array<{
+        name: string
+        paused: boolean
+        counts?: { waiting: number; active: number; delayed: number; completed: number; failed: number }
+      }> = []
       for (const name of names) {
-        const paused = await withTimeout(redis.llen(`bull:${name}:paused`))
-        out.push({ name, paused: paused > 0 })
+        const [paused, waiting, active, delayed, completed, failed] = await Promise.all([
+          withTimeout(redis.llen(`bull:${name}:paused`)),
+          withTimeout(redis.llen(`bull:${name}:wait`)),
+          withTimeout(redis.scard(`bull:${name}:active`)),
+          withTimeout(redis.zcard(`bull:${name}:delayed`)),
+          withTimeout(redis.zcard(`bull:${name}:completed`)),
+          withTimeout(redis.zcard(`bull:${name}:failed`))
+        ])
+        out.push({
+          name,
+          paused: (paused ?? 0) > 0,
+          counts: {
+            waiting: waiting ?? 0,
+            active: active ?? 0,
+            delayed: delayed ?? 0,
+            completed: completed ?? 0,
+            failed: failed ?? 0
+          }
+        })
       }
       return out
     })

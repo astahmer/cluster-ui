@@ -4,7 +4,7 @@ import { Badge, Table, TBody, TD, TH, THead, TR } from "../components/ui.tsx"
 import { fmtCountdown, fmtTime, relTime } from "../format.ts"
 import { ErrorNote, PageHeader, usePolling } from "../shell.tsx"
 import { ClockCounterClockwise } from "@phosphor-icons/react"
-import { Empty } from "../kumo"
+import { Checkbox, Empty } from "../kumo"
 import { FilterChip, SkeletonTable, SortableTh, STICKY_TH, useHashParam, useSort } from "../components/pieces.tsx"
 import { FilterBar, presenceFacet, useFacets, type FacetDef } from "../components/filters/index.tsx"
 
@@ -63,12 +63,8 @@ export function CronsPage() {
         title="Crons"
         subtitle="scheduled ClusterCron jobs — next delivery derived from stored deliver_at"
       >
-        <label className="flex cursor-pointer items-center gap-1.5 text-[12px] text-kumo-subtle">
-          <input
-            type="checkbox"
-            checked={overdueOnly}
-            onChange={(e) => setOverdueOnlyParam(e.target.checked)}
-          />
+        <label className="flex cursor-pointer items-center gap-2 text-[12px] text-kumo-subtle">
+          <Checkbox checked={overdueOnly} onCheckedChange={(checked) => setOverdueOnlyParam(Boolean(checked))} />
           overdue only
         </label>
       </PageHeader>

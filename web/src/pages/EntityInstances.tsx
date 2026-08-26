@@ -1,6 +1,6 @@
 import * as React from "react"
 import { api, type EntityInstance } from "../api.ts"
-import { ActivityDot, SkeletonTable } from "../components/pieces.tsx"
+import { ActivityDot, SkeletonTable, rowInteractions } from "../components/pieces.tsx"
 import { FilterBar, presenceFacet, useFacets, type FacetDef } from "../components/filters/index.tsx"
 import { Badge, Button, Input, Table, TBody, TD, TH, THead, TR } from "../components/ui.tsx"
 import { ErrorNote, PageHeader, usePolling } from "../shell.tsx"
@@ -79,9 +79,9 @@ export function EntityInstancesPage({ entityType }: { entityType: string }) {
               <TR
                 key={r.entityId}
                 className="cursor-pointer"
-                onClick={() =>
+                {...rowInteractions(() =>
                   (window.location.hash = `#/messages?entityType=${encodeURIComponent(entityType)}&entityId=${encodeURIComponent(r.entityId)}`)
-                }
+                )}
               >
                 <TD className="font-mono text-xs">{r.entityId}</TD>
                 <TD className="text-right tabular-nums">{r.total}</TD>

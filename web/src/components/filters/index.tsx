@@ -108,37 +108,42 @@ function FacetTrigger<T>({
 
   return (
     <div className="relative" ref={rootRef}>
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-        className={cn(
-          "flex cursor-pointer items-center gap-1.5 rounded-md border px-2.5 py-1 text-[12px] font-medium transition-colors",
-          isActive ?
-            "border-kumo-brand/40 bg-kumo-tint text-kumo-default" :
-            "border-kumo-line bg-kumo-base text-kumo-subtle hover:bg-kumo-tint hover:text-kumo-default"
-        )}
-      >
-        {!isActive && <Funnel className="h-3 w-3 opacity-70" />}
-        {def.label}
-        {isActive && (
-          <>
+      {isActive ? (
+        // P1-7: label + clear must be sibling buttons — nested interactive
+        // controls inside one <button> are invalid DOM/AX
+        <span className="flex items-stretch overflow-hidden rounded-md border border-kumo-brand/40 bg-kumo-tint">
+          <button
+            type="button"
+            aria-expanded={open}
+            onClick={() => setOpen((v) => !v)}
+            className="flex cursor-pointer items-center gap-1.5 px-2.5 py-1 text-[12px] font-medium text-kumo-default transition-colors hover:bg-kumo-tint"
+          >
+            {def.label}
             <span className="rounded bg-kumo-brand/20 px-1 tabular-nums">{selected.length}</span>
-            <span
-              role="button"
-              aria-label={`clear ${def.label} filter`}
-              className="rounded p-0.5 hover:bg-kumo-brand/20"
-              onClick={(e) => {
-                e.stopPropagation()
-                onClear()
-              }}
-            >
-              <X className="h-3 w-3" />
-            </span>
-          </>
-        )}
-        <CaretDown className="h-3 w-3 opacity-60" />
-      </button>
+            <CaretDown className="h-3 w-3 opacity-60" />
+          </button>
+          <span className="w-px bg-kumo-brand/30" aria-hidden="true" />
+          <button
+            type="button"
+            aria-label={`clear ${def.label} filter`}
+            onClick={onClear}
+            className="cursor-pointer px-1.5 text-kumo-subtle transition-colors hover:bg-kumo-brand/20 hover:text-kumo-default"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </span>
+      ) : (
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+          className="flex cursor-pointer items-center gap-1.5 rounded-md border border-kumo-line bg-kumo-base px-2.5 py-1 text-[12px] font-medium text-kumo-subtle transition-colors hover:bg-kumo-tint hover:text-kumo-default"
+        >
+          <Funnel className="h-3 w-3 opacity-70" />
+          {def.label}
+          <CaretDown className="h-3 w-3 opacity-60" />
+        </button>
+      )}
 
       {open && (
         <div className="absolute left-0 top-full z-30 mt-1 w-56 rounded-md border border-kumo-line bg-kumo-base p-2 shadow-lg">

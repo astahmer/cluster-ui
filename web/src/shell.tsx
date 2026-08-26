@@ -421,6 +421,16 @@ function ShellLayout({
   const [busDown, setBusDownState] = React.useState(live.isBusDown())
   React.useEffect(() => live.onBusDownChange(setBusDownState), [])
 
+  // lock background scroll while the mobile drawer is open (P2-14)
+  React.useEffect(() => {
+    if (!navOpen) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    return () => {
+      document.body.style.overflow = prev
+    }
+  }, [navOpen])
+
   return (
     <div className="flex h-full">
       {/* desktop sidebar */}
@@ -428,11 +438,14 @@ function ShellLayout({
         <SidebarContent base={base} />
       </aside>
 
-      {/* mobile off-canvas drawer */}
+      {/* mobile off-canvas drawer — modal semantics + body scroll lock (P2-14) */}
       {navOpen && (
         <div className="fixed inset-0 z-40 lg:hidden" onClick={onNavClose}>
           <div className="absolute inset-0 bg-black/40" />
           <aside
+            role="dialog"
+            aria-modal="true"
+            aria-label="navigation"
             className="absolute inset-y-0 left-0 flex w-60 flex-col border-r border-kumo-line bg-kumo-base shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >

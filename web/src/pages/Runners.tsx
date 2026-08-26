@@ -4,6 +4,7 @@ import { api, type Runner } from "../api.ts"
 import { Badge, Table, TBody, TD, TH, THead, TR } from "../components/ui.tsx"
 import { ErrorNote, PageHeader, useLive } from "../shell.tsx"
 import { Empty } from "../kumo"
+import { STICKY_TH } from "../components/pieces.tsx"
 import { SkeletonTable, SortableTh, useSort } from "../components/pieces.tsx"
 import { FilterBar, presenceFacet, useFacets, type FacetDef } from "../components/filters/index.tsx"
 
@@ -40,12 +41,12 @@ export function RunnersPage() {
           <THead>
             <TR>
               <SortableTh label="Address" sortKey="address" sort={sort} />
-              <TH className="sticky top-0 z-10 bg-kumo-base">Host</TH>
-              <TH className="sticky top-0 z-10 bg-kumo-base">Groups</TH>
+              <TH className={STICKY_TH}>Host</TH>
+              <TH className={STICKY_TH}>Groups</TH>
               <SortableTh label="Version" sortKey="version" sort={sort} />
               <SortableTh label="Shards" sortKey="shards" sort={sort} className="text-right" />
-              <TH className="sticky top-0 z-10 bg-kumo-base">Status</TH>
-              <TH className="sticky top-0 z-10 bg-kumo-base">Load</TH>
+              <TH className={STICKY_TH}>Status</TH>
+              <TH className={STICKY_TH}>Load</TH>
             </TR>
           </THead>
           <TBody>

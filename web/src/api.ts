@@ -313,6 +313,7 @@ export interface ReporterSingletonInfo {
 export interface QueueInfo {
   name: string
   paused: boolean
+  counts?: { waiting: number; active: number; delayed: number; completed: number; failed: number }
 }
 
 export interface TraceSummary {
@@ -394,6 +395,17 @@ export const api = {
     post<{ ok: true }>("/api/actions/pause-queue", { queue, ...(cluster ? { cluster } : {}) }),
   resumeQueue: (queue: string, cluster?: string) =>
     post<{ ok: true }>("/api/actions/resume-queue", { queue, ...(cluster ? { cluster } : {}) }),
+  /** remove completed/failed jobs ("*" = every queue); pass olderThanMs/count to scope */
+  cleanQueue: (queue: string, state: "completed" | "failed" | "*", opts?: { olderThanMs?: number; count?: number }, cluster?: string) =>
+    post<{ removed: number }>(
+      "/api/actions/clean",
+      { queue, state, ...opts, ...(cluster ? { cluster } : {}) }
+    ),
+  addJob: (queue: string, name: string, data: unknown, cluster?: string) =>
+    post<{ ok: true; id: string }>(
+      "/api/actions/add-job",
+      { queue, name, data, ...(cluster ? { cluster } : {}) }
+    ),
   jobTree: (id: string) => get<JobTreeNode>(`/api/job-tree/${encodeURIComponent(id)}`),
   trace: (traceId: string) =>
     get<{ traceId: string; rows: Message[] }>(`/api/traces/${encodeURIComponent(traceId)}`),

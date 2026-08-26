@@ -95,11 +95,15 @@ export function CommandPalette({
             onKeyDown={onKey}
             placeholder="Jump to page or paste a message id…"
             aria-label="command palette"
+            role="combobox"
+            aria-expanded="true"
+            aria-controls="command-palette-listbox"
+            aria-activedescendant={`palette-option-${index}`}
             className="w-full bg-transparent text-sm outline-none placeholder:text-kumo-inactive"
           />
           <kbd className="rounded border border-kumo-line px-1 text-[10px] text-kumo-inactive">esc</kbd>
         </div>
-        <div className="max-h-80 overflow-y-auto p-1.5" role="listbox" aria-label="commands">
+        <div id="command-palette-listbox" className="max-h-80 overflow-y-auto p-1.5" role="listbox" aria-label="commands">
           {filtered.length === 0 && (
             <div className="px-3 py-6 text-center text-[13px] text-kumo-subtle">no matches</div>
           )}
@@ -107,6 +111,7 @@ export function CommandPalette({
             <button
               type="button"
               key={item.key}
+              id={`palette-option-${i}`}
               role="option"
               aria-selected={i === index}
               onMouseEnter={() => setIndex(i)}
