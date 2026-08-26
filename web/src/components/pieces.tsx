@@ -13,6 +13,15 @@ export const statusTone: Record<MessageStatus, StatusTone> = {
 }
 
 export function StatusBadge({ status }: { status: MessageStatus }) {
+  // P2-18: scheduled would collide with pending (both warm hues) — give it a
+  // dashed-outline link-colored badge so shape AND hue differ from pending.
+  if (status === "scheduled") {
+    return (
+      <Badge tone="neutral" className="border border-dashed border-kumo-brand bg-transparent !text-kumo-link">
+        {status}
+      </Badge>
+    )
+  }
   return <Badge tone={statusTone[status]}>{status}</Badge>
 }
 
@@ -415,5 +424,47 @@ export function FilterChip({ label, onRemove }: { label: React.ReactNode; onRemo
         ✕
       </button>
     </Badge>
+  )
+}
+
+/**
+ * Shared pager (P2-4): "page x / y" with prev/next. Used by Messages and
+ * EntityInstances so paging looks and behaves the same everywhere.
+ */
+export function Pager({
+  page,
+  total,
+  pageSize,
+  onChange
+}: {
+  page: number
+  total: number
+  pageSize: number
+  onChange: (p: number) => void
+}) {
+  const pages = Math.max(1, Math.ceil(total / pageSize))
+  if (pages <= 1) return null
+  return (
+    <div className="mt-3 flex items-center justify-end gap-2 text-[13px] text-kumo-subtle">
+      <button
+        type="button"
+        className="cursor-pointer rounded-md border border-kumo-line px-2 py-0.5 text-[12px] font-medium text-kumo-default disabled:cursor-not-allowed disabled:opacity-50"
+        disabled={page <= 1}
+        onClick={() => onChange(page - 1)}
+      >
+        ← prev
+      </button>
+      <span className="tabular-nums">
+        page {page} / {pages}
+      </span>
+      <button
+        type="button"
+        className="cursor-pointer rounded-md border border-kumo-line px-2 py-0.5 text-[12px] font-medium text-kumo-default disabled:cursor-not-allowed disabled:opacity-50"
+        disabled={page >= pages}
+        onClick={() => onChange(page + 1)}
+      >
+        next →
+      </button>
+    </div>
   )
 }

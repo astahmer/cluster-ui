@@ -31,6 +31,12 @@ export function TracesPage() {
         <span className="text-[12px] text-kumo-subtle">click a trace for its waterfall</span>
       </PageHeader>
       <ErrorNote error={error} onRetry={refresh} />
+      {/* server caps the listing at 50 — say so instead of silently truncating (P1-15) */}
+      {traces.length > 0 && (
+        <p className="mb-2 text-[12px] text-kumo-subtle">
+          showing latest {traces.length} traces{traces.length === 50 ? " (server cap)" : ""}
+        </p>
+      )}
 
       <div className="rounded-lg border border-kumo-line bg-kumo-base">
         <Table>
@@ -225,7 +231,7 @@ function toSpans(rows: ReadonlyArray<Message>): TimelineSpan[] {
       label: (
         <>
           <span className="font-medium">{m.tag || m.entityType}</span>
-          {m.tag && m.entityType && <span className="text-kumo-inactive"> · {m.entityType}</span>}
+          {m.tag && m.entityType && <span className="text-kumo-subtle"> · {m.entityType}</span>}
         </>
       ),
       group: m.entityType,

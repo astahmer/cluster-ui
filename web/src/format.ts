@@ -1,6 +1,10 @@
 export function fmtTime(ms: number | null | undefined): string {
   if (!ms) return "—"
-  return new Date(ms).toLocaleString(undefined, {
+  const d = new Date(ms)
+  // include the year when it's not the current one (cross-year traces, P2-6)
+  const year = d.getFullYear() !== new Date().getFullYear() ? { year: "numeric" as const } : {}
+  return d.toLocaleString(undefined, {
+    ...year,
     month: "short",
     day: "numeric",
     hour: "2-digit",

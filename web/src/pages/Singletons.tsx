@@ -133,7 +133,7 @@ function ReporterMissing({ reason }: { reason?: string }) {
         </span>
       }
     >
-      <span className="cursor-help text-[12px] text-kumo-inactive">reporter not reachable</span>
+      <span className="cursor-help text-[12px] text-kumo-subtle">reporter not reachable</span>
     </Tooltip>
   )
 }

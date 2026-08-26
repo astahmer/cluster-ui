@@ -390,7 +390,8 @@ export function makeRedisRepo(url: string): import("./queries.ts").Repo {
         const [paused, waiting, active, delayed, completed, failed] = await Promise.all([
           withTimeout(redis.llen(`bull:${name}:paused`)),
           withTimeout(redis.llen(`bull:${name}:wait`)),
-          withTimeout(redis.scard(`bull:${name}:active`)),
+          // BullMQ "active" is a list, like wait/paused
+          withTimeout(redis.llen(`bull:${name}:active`)),
           withTimeout(redis.zcard(`bull:${name}:delayed`)),
           withTimeout(redis.zcard(`bull:${name}:completed`)),
           withTimeout(redis.zcard(`bull:${name}:failed`))

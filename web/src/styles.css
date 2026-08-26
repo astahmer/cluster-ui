@@ -20,3 +20,9 @@ body {
   scrollbar-width: thin;
   scrollbar-color: var(--color-kumo-line) transparent;
 }
+
+/* thin top activity bar while API requests are in flight (UX review P1-12) */
+@keyframes net-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}

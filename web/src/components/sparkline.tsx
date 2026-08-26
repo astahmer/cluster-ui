@@ -49,12 +49,15 @@ export function Sparkline({
 }) {
   const color = TONE_COLORS[tone]
   const values = points.map((p) => p.v)
+  // P1-10: pointer-tracking crosshair — hover inspects t/v at any point
+  const wrapRef = React.useRef<HTMLDivElement | null>(null)
+  const [hoverIdx, setHoverIdx] = React.useState<number | null>(null)
 
   if (values.length === 0) {
     return (
       <div
         className={cn(
-          "flex items-center justify-center rounded-md border border-dashed border-kumo-line text-[11px] text-kumo-inactive",
+          "flex items-center justify-center rounded-md border border-dashed border-kumo-line text-[11px] text-kumo-subtle",
           className
         )}
         style={{ height }}
@@ -83,8 +86,23 @@ export function Sparkline({
 
   const last = points[points.length - 1]
 
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (points.length < 2) return
+    const rect = wrapRef.current?.getBoundingClientRect()
+    if (!rect || rect.width === 0) return
+    const frac = Math.min(Math.max((e.clientX - rect.left) / rect.width, 0), 1)
+    setHoverIdx(Math.round(frac * (points.length - 1)))
+  }
+  const hovered = hoverIdx !== null ? points[hoverIdx] : null
+
   return (
-    <div className={cn("relative", className)} style={{ height }}>
+    <div
+      ref={wrapRef}
+      className={cn("relative", className)}
+      style={{ height }}
+      onPointerMove={onPointerMove}
+      onPointerLeave={() => setHoverIdx(null)}
+    >
       <svg
         viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
         preserveAspectRatio="none"
@@ -103,6 +121,31 @@ export function Sparkline({
           strokeLinejoin="round"
           strokeLinecap="round"
         />
+        {/* crosshair at the hovered sample (P1-10) */}
+        {hovered && hoverIdx !== null && values.length > 1 && (
+          <g>
+            <line
+              x1={x(hoverIdx)}
+              y1={0}
+              x2={x(hoverIdx)}
+              y2={VIEW_H}
+              stroke={color}
+              strokeWidth={1}
+              strokeDasharray="3 3"
+              opacity={0.7}
+            />
+            <rect
+              x={x(hoverIdx) - 4}
+              y={y(hovered.v) - 4}
+              width={8}
+              height={8}
+              rx={4}
+              fill={color}
+              stroke="var(--color-kumo-base)"
+              strokeWidth={1.5}
+            />
+          </g>
+        )}
         {/* last-point marker (circle radius compensates non-uniform scaling visually) */}
         <rect
           x={(values.length === 1 ? VIEW_W / 2 : VIEW_W) - 3}
@@ -116,6 +159,17 @@ export function Sparkline({
       {showLastLabel && (
         <span className="absolute right-0 top-0 rounded bg-kumo-base/80 px-1 text-[11px] font-semibold tabular-nums text-kumo-default">
           {formatValue(last.v)}
+        </span>
+      )}
+      {hovered && (
+        <span
+          className="pointer-events-none absolute top-0 z-10 -translate-x-1/2 whitespace-nowrap rounded border border-kumo-line bg-kumo-elevated px-1.5 py-0.5 text-[11px] tabular-nums text-kumo-default shadow-sm"
+          style={{ left: `${values.length > 1 ? (hoverIdx! / (values.length - 1)) * 100 : 50}%` }}
+        >
+          {formatValue(hovered.v)}
+          <span className="ml-1 text-kumo-subtle">
+            {new Date(hovered.t).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
+          </span>
         </span>
       )}
     </div>

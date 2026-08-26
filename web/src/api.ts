@@ -233,7 +233,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getToken()
   if (token && !headers.has("Authorization")) headers.set("Authorization", `Bearer ${token}`)
 
-  const res = await fetch(withCluster(path), { ...init, headers })
+  // global in-flight counter → the shell draws a thin activity bar (P1-12)
+  window.dispatchEvent(new CustomEvent("ui:net", { detail: { delta: 1 } }))
+  let res: Response
+  try {
+    res = await fetch(withCluster(path), { ...init, headers })
+  } finally {
+    window.dispatchEvent(new CustomEvent("ui:net", { detail: { delta: -1 } }))
+  }
 
   if (res.status === 401 && !path.startsWith("/api/auth")) {
     window.dispatchEvent(new CustomEvent(AUTH_REQUIRED_EVENT))

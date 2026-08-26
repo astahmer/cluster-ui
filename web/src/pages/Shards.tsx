@@ -7,6 +7,18 @@ import { FilterBar, useFacets, type FacetDef } from "../components/filters/index
 
 type ShardFilter = "all" | "assigned" | "unassigned"
 
+/* categorical per-runner hues (P1-14): stable hash → palette slot */
+const RUNNER_PALETTE = [
+  "#d95f6e", "#e08b3c", "#b99a24", "#63a24e",
+  "#3aa88f", "#4299c9", "#7b7bd6", "#ad5cc9"
+]
+function hashString(s: string): number {
+  let h = 0
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0
+  return Math.abs(h)
+}
+const runnerHue = (address: string) => RUNNER_PALETTE[hashString(address) % RUNNER_PALETTE.length]
+
 export function ShardsPage() {
   const [shards, setShards] = React.useState<Shard[]>([])
   const [filterParam, setFilterParam] = useHashParam("filter")
@@ -34,6 +46,10 @@ export function ShardsPage() {
     filter === "all" ? true : filter === "assigned" ? s.address !== null : s.address === null
   )
   const assignedCount = shards.filter((s) => s.address !== null).length
+  // per-runner counts for the map legend (P1-14)
+  const runners = [...new Set(shards.filter((s) => s.address !== null).map((s) => s.address!))]
+    .sort()
+    .map((address) => ({ address, count: shards.filter((s) => s.address === address).length }))
 
   return (
     <div>
@@ -53,7 +69,7 @@ export function ShardsPage() {
       <ErrorNote error={error} onRetry={refresh} />
       <div className="mb-4 rounded-lg border border-kumo-line bg-kumo-base p-4">
         <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-kumo-subtle">
-          Distribution map — one cell per shard
+          Distribution map — one cell per shard, colored by runner
         </div>
         <div
           className="grid gap-[3px]"
@@ -64,23 +80,29 @@ export function ShardsPage() {
               key={s.shardId}
               title={`shard ${s.shardId} → ${s.address ?? "UNASSIGNED"}`}
               aria-label={`shard ${s.shardId} ${s.address ? `assigned to ${s.address}` : "unassigned"}`}
-              className={
-                "aspect-square cursor-help rounded-[3px] " +
-                (s.address
-                  ? "bg-(--color-kumo-brand)/80"
-                  : "border border-kumo-warning/50 bg-kumo-warning/10")
+              className="aspect-square cursor-help rounded-[3px]"
+              style={
+                s.address
+                  ? { background: runnerHue(s.address), opacity: 0.85 }
+                  : { background: "color-mix(in oklab, var(--color-kumo-warning) 12%, transparent)", boxShadow: "inset 0 0 0 1px color-mix(in oklab, var(--color-kumo-warning) 50%, transparent)" }
               }
             />
           ))}
         </div>
-        <div className="mt-3 flex items-center gap-4 text-[12px] text-kumo-subtle">
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[12px] text-kumo-subtle">
           <span className="flex items-center gap-1.5">
-            <span className="h-2.5 w-2.5 rounded-sm bg-(--color-kumo-brand)/80" /> assigned
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="h-2.5 w-2.5 rounded-sm border border-kumo-warning/50 bg-kumo-warning/10" />{" "}
+            <span
+              className="h-2.5 w-2.5 rounded-sm"
+              style={{ background: "color-mix(in oklab, var(--color-kumo-warning) 12%, transparent)", boxShadow: "inset 0 0 0 1px color-mix(in oklab, var(--color-kumo-warning) 50%, transparent)" }}
+            />{" "}
             unassigned (rebalancing)
           </span>
+          {runners.map((r) => (
+            <span key={r.address} className="flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-sm" style={{ background: runnerHue(r.address), opacity: 0.85 }} />
+              {r.address} · {r.count} shard{r.count === 1 ? "" : "s"}
+            </span>
+          ))}
         </div>
       </div>
 

@@ -93,14 +93,14 @@ function RunnerCard({
           <Badge tone={reachable ? "ok" : "neutral"}>
             {reachable ? `${(logs?.lines ?? []).length} lines · ${(fibers?.fibers ?? []).length} fibers` : "reporter not reachable"}
           </Badge>
-          <span className="text-kumo-inactive">{open ? "▾" : "▸"}</span>
+          <span className="text-kumo-subtle">{open ? "▾" : "▸"}</span>
         </span>
       </button>
 
       {open && (
         <div className="border-t border-kumo-line p-3">
           {!reachable ? (
-            <p className="text-[12px] text-kumo-inactive">
+            <p className="text-[12px] text-kumo-subtle">
               Mount @effect/cluster-ui-reporter with the optional{" "}
               <code className="rounded bg-kumo-canvas px-1">logs</code> /{" "}
               <code className="rounded bg-kumo-canvas px-1">fibers</code> providers to enable this panel.
@@ -113,7 +113,7 @@ function RunnerCard({
                   Fibers
                 </div>
                 {(fibers?.fibers?.length ?? 0) === 0 ? (
-                  <p className="text-[12px] text-kumo-inactive">no fiber snapshot</p>
+                  <p className="text-[12px] text-kumo-subtle">no fiber snapshot</p>
                 ) : (
                   <table className="w-full text-left text-[12px]">
                     <thead>
@@ -150,12 +150,12 @@ function RunnerCard({
                   Recent logs
                 </div>
                 {(logs?.lines?.length ?? 0) === 0 ? (
-                  <p className="text-[12px] text-kumo-inactive">no log lines reported</p>
+                  <p className="text-[12px] text-kumo-subtle">no log lines reported</p>
                 ) : (
                   <pre className="max-h-64 overflow-auto rounded-md border border-kumo-line bg-kumo-base p-2 font-mono text-[11px] leading-4 text-kumo-default">
                     {(logs?.lines ?? []).map((line, i) => (
                       <div key={`${line.t}-${i}`} className="whitespace-pre-wrap">
-                        <span className="text-kumo-inactive">
+                        <span className="text-kumo-subtle">
                           {new Date(line.t).toLocaleTimeString()}{" "}
                           {line.level ? `[${line.level}] ` : ""}
                         </span>

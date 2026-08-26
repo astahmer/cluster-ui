@@ -13,6 +13,25 @@
 > — the selected cluster mirrors into the hash as `?cluster=` (shared/bookmarked links
 > adopt it on boot), TopBar select is backed by a setCluster pub/sub, and the Agent page's
 > second picker now follows the global cluster when unset ("follow topbar cluster").
+>
+> Batch 3b+3c+3d+3e (2026-08-26): **P1-3 [fixed]** — queue counts (waiting/active/delayed/
+> completed/failed) from BullMQ keys + Add-job and Clean dialogs per queue. **P1-6b/c [fixed]**
+> — rows are focusable with Enter/Space (`rowInteractions`); DetailPanel, run modal and mobile
+> drawer get `useDialogA11y` (role=dialog, aria-modal, focus trap, initial focus, restore,
+> body scroll lock). **P1-7 [fixed]** — facet pill is sibling buttons. **P1-9 [fixed]** —
+> informational `text-kumo-inactive` swept to `subtle`; Overview busiest-entities no longer
+> uses brand orange as body text. **P1-10 [fixed]** — sparkline crosshair + value/time bubble.
+> **P1-12 [fixed]** — thin net-activity bar on API calls, mobile freshness dot, paused content
+> dim. **P1-14 [fixed]** — shards colored per runner via stable hash + legend with counts.
+> **P1-15 [partially fixed]** — "showing latest N" caption + palette opens hex trace ids;
+> offset paging still open. **P2-4..P2-9 [fixed]** (shared Pager, relTime Started, year in
+> fmtTime, honest sort arrow + aria-sort, Esc LIFO stack, theme toggle Phosphor icons + system
+> option, drawer scroll lock, STICKY_TH const, kumo Checkbox, combobox wiring). **P2-18 [fixed]**
+> — scheduled = dashed-outline link badge. **P2-19 [fixed]** — collapsible filters disclosure
+> with active count. **P2-20 [fixed]** — search placeholder hints "paste an id".
+> **IA [regrouped]** — nav is now Cluster / Infra / Work / Observe / Tools; Singletons rename
+> and metrics 7d remain deferred. **P1-11 [partially fixed]** — fuzzy subsequence scoring,
+> keyword noise hidden, cluster-switch commands; async entity/workflow providers still open.
 
 ---
 

@@ -1,6 +1,6 @@
 import * as React from "react"
 import { api, type EntityInstance } from "../api.ts"
-import { ActivityDot, SkeletonTable, rowInteractions } from "../components/pieces.tsx"
+import { ActivityDot, SkeletonTable, rowInteractions, Pager } from "../components/pieces.tsx"
 import { FilterBar, presenceFacet, useFacets, type FacetDef } from "../components/filters/index.tsx"
 import { Badge, Button, Input, Table, TBody, TD, TH, THead, TR } from "../components/ui.tsx"
 import { ErrorNote, PageHeader, usePolling } from "../shell.tsx"
@@ -114,20 +114,7 @@ export function EntityInstancesPage({ entityType }: { entityType: string }) {
         </Table>
       </div>
 
-      <div className="mt-3 flex items-center justify-end gap-2 text-[13px] text-kumo-subtle">
-        <Button variant="secondary" size="sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>
-          ← prev
-        </Button>
-        <span className="tabular-nums">page {page}</span>
-        <Button
-          variant="secondary"
-          size="sm"
-          disabled={page * pageSize >= total}
-          onClick={() => setPage(page + 1)}
-        >
-          next →
-        </Button>
-      </div>
+      <Pager page={page} total={total} pageSize={pageSize} onChange={setPage} />
     </div>
   )
 }

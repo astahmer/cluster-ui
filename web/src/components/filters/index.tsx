@@ -154,12 +154,12 @@ function FacetTrigger<T>({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="search…"
-              className="mb-1.5 w-full rounded border border-kumo-line bg-kumo-canvas px-2 py-1 text-[12px] outline-none placeholder:text-kumo-inactive focus:border-kumo-brand"
+              className="mb-1.5 w-full rounded border border-kumo-line bg-kumo-canvas px-2 py-1 text-[12px] outline-none placeholder:text-kumo-subtle focus:border-kumo-brand"
             />
           )}
           <div className="max-h-56 overflow-y-auto">
             {visible.length === 0 && (
-              <div className="px-1 py-2 text-[12px] text-kumo-inactive">no options</div>
+              <div className="px-1 py-2 text-[12px] text-kumo-subtle">no options</div>
             )}
             {visible.map((option) => {
               const checked = selected.includes(option.value)

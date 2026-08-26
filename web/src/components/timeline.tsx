@@ -94,7 +94,7 @@ export function SpanWaterfall({
             {ticks.map((t) => (
               <span
                 key={t}
-                className="absolute top-0 -translate-x-1/2 text-[10px] tabular-nums text-kumo-inactive"
+                className="absolute top-0 -translate-x-1/2 text-[10px] tabular-nums text-kumo-subtle"
                 style={{ left: `${pct(t)}%` }}
               >
                 {t - t0 === 0 ? "0" : axisLabel(t - t0)}
@@ -122,7 +122,7 @@ export function SpanWaterfall({
             return (
               <React.Fragment key={s.key}>
                 {showGroupHeader && (
-                  <div className="mt-2 mb-1 border-b border-kumo-line pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-kumo-inactive first:mt-0">
+                  <div className="mt-2 mb-1 border-b border-kumo-line pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-kumo-subtle first:mt-0">
                     {s.group}
                   </div>
                 )}

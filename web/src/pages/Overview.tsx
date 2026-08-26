@@ -144,7 +144,7 @@ export function OverviewPage() {
           <CardContent className="space-y-1.5">
             {data!.topEntities.map((e) => (
               <div key={e.entityType} className="flex items-center justify-between text-[13px]">
-                <code className="truncate text-kumo-brand/90">{e.entityType}</code>
+                <code className="truncate text-kumo-default">{e.entityType}</code>
                 <span className="flex items-center gap-2 tabular-nums text-kumo-subtle">
                   {e.active > 0 && <Badge tone="warn">{e.active} active</Badge>}
                   {e.total} msgs

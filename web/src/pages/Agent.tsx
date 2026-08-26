@@ -244,7 +244,7 @@ function AgentPageBody({
           <MessageBubble key={m.id} message={m} />
         ))}
         {isStreaming && (
-          <div className="text-[12px] text-kumo-inactive" data-testid="agent-streaming">
+          <div className="text-[12px] text-kumo-subtle" data-testid="agent-streaming">
             thinking…
           </div>
         )}
@@ -326,7 +326,7 @@ function ToolCard({ part }: { part: ToolInvocationMessagePart }) {
       >
         <Badge tone={tone as "ok" | "err" | "info"}>{stateLabel}</Badge>
         <span>{part.toolName}()</span>
-        <span className="ml-auto text-[10px] text-kumo-inactive">{open ? "hide" : "details"}</span>
+        <span className="ml-auto text-[10px] text-kumo-subtle">{open ? "hide" : "details"}</span>
       </button>
       {isError && part.errorText && <div className="mt-1 text-[12px] text-kumo-danger">{part.errorText}</div>}
       {open && (

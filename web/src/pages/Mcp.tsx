@@ -133,7 +133,7 @@ function ToolRow({ tool }: { tool: McpTool }) {
             </span>
             <span className="text-[12px] leading-4 text-kumo-subtle">{text}</span>
           </span>
-          <span className="shrink-0 text-[11px] text-kumo-inactive">{open ? "hide schema" : "schema"}</span>
+          <span className="shrink-0 text-[11px] text-kumo-subtle">{open ? "hide schema" : "schema"}</span>
         </button>
         {open && (
           <div className="mt-2">

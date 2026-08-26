@@ -7,9 +7,9 @@ import {
   type MessageStatus,
   type RunResult
 } from "../api.ts"
-import { Trash, XCircle } from "@phosphor-icons/react"
+import { FunnelSimple, Trash, XCircle } from "@phosphor-icons/react"
 import { downloadCsv, downloadJson } from "../export.ts"
-import { DetailPanel, SkeletonTable, StatusBadge, statusTone, rowInteractions, useMessageDetail } from "../components/pieces.tsx"
+import { DetailPanel, SkeletonTable, StatusBadge, statusTone, rowInteractions, useMessageDetail, Pager } from "../components/pieces.tsx"
 import { FilterBar, useFacets, type FacetDef } from "../components/filters/index.tsx"
 import { FlowGraph, jobTreeToSpecs } from "../components/flow-graph.tsx"
 import { confirmDialog } from "../components/dialogs.tsx"
@@ -94,8 +94,13 @@ export function MessagesPage({
   const [entityId, setEntityId] = React.useState(initialFilters?.entityId ?? "")
   const [q, setQ] = React.useState(initialFilters?.q ?? "")
   const [debouncedQ, setDebouncedQ] = React.useState("")
+  // P2-19 collapsible filters
+  const [showFilters, setShowFilters] = React.useState(false)
   const [createdAfter, setCreatedAfter] = React.useState("")
   const [createdBefore, setCreatedBefore] = React.useState("")
+
+  // P2-19: number of collapsed filters currently active (drives the badge)
+  const activeFilterCount = [entityType, entityId, createdAfter, createdBefore].filter((v) => v !== "").length
   const [pageSize, setPageSize] = React.useState(50)
   const [sort, setSort] = React.useState<"id" | "deliverAt">("id")
   const [page, setPage] = React.useState(1)
@@ -308,56 +313,73 @@ export function MessagesPage({
         <InputGroup className="w-56">
           <InputGroup.Input
             aria-label="search messages"
-            placeholder="search id / entity / tag…"
+            placeholder="search id / entity / tag — paste an id"
             value={q}
             onChange={(e) => setQ(e.target.value)}
             data-search-input
           />
         </InputGroup>
-        <Input
-          aria-label="filter by entity type"
-          placeholder="entity type"
-          value={entityType}
-          onChange={(e) => {
-            setEntityType(e.target.value)
-            setPage(1)
-          }}
-          className="w-40"
-        />
-        <Input
-          aria-label="filter by entity id"
-          placeholder="entity id"
-          value={entityId}
-          onChange={(e) => {
-            setEntityId(e.target.value)
-            setPage(1)
-          }}
-          className="w-40"
-        />
-        <label className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-kumo-subtle">
-          after
-          <Input
-            type="datetime-local"
-            value={createdAfter}
-            onChange={(e) => {
-              setCreatedAfter(e.target.value)
-              setPage(1)
-            }}
-            className="w-44"
-          />
-        </label>
-        <label className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-kumo-subtle">
-          before
-          <Input
-            type="datetime-local"
-            value={createdBefore}
-            onChange={(e) => {
-              setCreatedBefore(e.target.value)
-              setPage(1)
-            }}
-            className="w-44"
-          />
-        </label>
+        {/* P2-19: secondary filters collapse behind a disclosure with an
+            active-filter count so the toolbar doesn't stack tall on narrow screens */}
+        <Button
+          variant={activeFilterCount > 0 ? "secondary" : "ghost"}
+          size="sm"
+          aria-expanded={showFilters}
+          onClick={() => setShowFilters((v) => !v)}
+        >
+          <FunnelSimple className="h-3.5 w-3.5" /> filters
+          {activeFilterCount > 0 && (
+            <span className="rounded bg-kumo-brand/20 px-1 tabular-nums">{activeFilterCount}</span>
+          )}
+        </Button>
+        {showFilters && (
+          <>
+            <Input
+              aria-label="filter by entity type"
+              placeholder="entity type"
+              value={entityType}
+              onChange={(e) => {
+                setEntityType(e.target.value)
+                setPage(1)
+              }}
+              className="w-40"
+            />
+            <Input
+              aria-label="filter by entity id"
+              placeholder="entity id"
+              value={entityId}
+              onChange={(e) => {
+                setEntityId(e.target.value)
+                setPage(1)
+              }}
+              className="w-40"
+            />
+            <label className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-kumo-subtle">
+              after
+              <Input
+                type="datetime-local"
+                value={createdAfter}
+                onChange={(e) => {
+                  setCreatedAfter(e.target.value)
+                  setPage(1)
+                }}
+                className="w-44"
+              />
+            </label>
+            <label className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-kumo-subtle">
+              before
+              <Input
+                type="datetime-local"
+                value={createdBefore}
+                onChange={(e) => {
+                  setCreatedBefore(e.target.value)
+                  setPage(1)
+                }}
+                className="w-44"
+              />
+            </label>
+          </>
+        )}
         <Select
           value={String(pageSize)}
           onChange={(e) => {
@@ -430,6 +452,7 @@ export function MessagesPage({
                 <button
                   type="button"
                   title="toggle server-side sort"
+                  aria-sort={sort === "id" ? "descending" : "ascending"}
                   className="cursor-pointer"
                   onClick={() => {
                     setSort((prev) => (prev === "id" ? "deliverAt" : "id"))
@@ -437,7 +460,10 @@ export function MessagesPage({
                   }}
                 >
                   {tab === "scheduled" ? "Delivers" : "Created"}{" "}
-                  {sort !== "id" && <span aria-hidden>▼</span>}
+                  {/* honest direction: id = newest first (desc); deliverAt = soonest first (asc) */}
+                  <span className="text-kumo-subtle" aria-hidden>
+                    {sort === "id" ? "\u2193" : "\u2191"}
+                  </span>
                 </button>
               </TH>
               <TH />
@@ -843,34 +869,6 @@ export function Field({
 export function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
     <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-kumo-subtle">{children}</h3>
-  )
-}
-
-function Pager({
-  page,
-  total,
-  pageSize,
-  onChange
-}: {
-  page: number
-  total: number
-  pageSize: number
-  onChange: (p: number) => void
-}) {
-  const pages = Math.max(1, Math.ceil(total / pageSize))
-  if (pages <= 1) return null
-  return (
-    <div className="mt-3 flex items-center justify-end gap-2 text-[13px] text-kumo-subtle">
-      <Button variant="secondary" size="sm" disabled={page <= 1} onClick={() => onChange(page - 1)}>
-        ← prev
-      </Button>
-      <span className="tabular-nums">
-        page {page} / {pages}
-      </span>
-      <Button variant="secondary" size="sm" disabled={page >= pages} onClick={() => onChange(page + 1)}>
-        next →
-      </Button>
-    </div>
   )
 }
 

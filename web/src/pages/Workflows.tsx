@@ -1,6 +1,7 @@
 import * as React from "react"
 import { api, type MessageStatus, type Workflow, type WorkflowRun } from "../api.ts"
 import { ActivityDot, FilterChip, SkeletonTable, SortableTh, STICKY_TH, useDialogA11y, useHashParam, rowInteractions, useSort } from "../components/pieces.tsx"
+import { relTime } from "../format.ts"
 import { FilterBar, presenceFacet, useFacets, type FacetDef } from "../components/filters/index.tsx"
 import { Badge, Card, CardContent, Select, Table, TBody, TD, TH, THead, TR } from "../components/ui.tsx"
 import { ErrorNote, PageHeader, useLive } from "../shell.tsx"
@@ -225,8 +226,8 @@ export function WorkflowRunsPage({
                   <StatusBadge status={r.status as MessageStatus} />
                 </TD>
                 <TD className="tabular-nums text-kumo-subtle">{r.activityCount}</TD>
-                <TD className="whitespace-nowrap text-kumo-subtle">
-                  {new Date(r.createdAt).toLocaleString()}
+                <TD className="whitespace-nowrap text-kumo-subtle" title={new Date(r.createdAt).toLocaleString()}>
+                  {relTime(new Date(r.createdAt).getTime())}
                 </TD>
               </TR>
             ))}

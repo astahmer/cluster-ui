@@ -1,6 +1,7 @@
 import * as React from "react"
-import { SquaresFour, Cpu, GridFour, Cube, ClockCounterClockwise, FlowArrow, ListDashes, CirclesThree, List, Stack, Sparkle, Plugs, MagnifyingGlass, QueueIcon } from "@phosphor-icons/react"
+import { SquaresFour, Cpu, GridFour, Cube, ClockCounterClockwise, FlowArrow, ListDashes, CirclesThree, List, Stack, Sparkle, Plugs, MagnifyingGlass, QueueIcon, Moon, Sun } from "@phosphor-icons/react"
 import { api, getCluster, onClusterChange, setCluster } from "./api.ts"
+import { toast } from "./toast.tsx"
 import * as live from "./live.ts"
 import { useFreshness } from "./freshness.ts"
 import { inputVariants } from "./kumo"
@@ -88,15 +89,20 @@ export const usePolling = live.useLive
 
 /**
  * Registers a handler fired when the user presses Escape anywhere.
- * Detail panels/modals use this to close themselves.
+ * Handlers form a LIFO stack (P2-9): one Esc closes only the most recently
+ * opened surface instead of every open panel at once.
  */
+const escStack: Array<() => void> = []
 export function useEscToClose(handler: () => void) {
   const ref = React.useRef(handler)
   ref.current = handler
   React.useEffect(() => {
     const fn = () => ref.current()
-    window.addEventListener("ui:esc", fn)
-    return () => window.removeEventListener("ui:esc", fn)
+    escStack.push(fn)
+    return () => {
+      const i = escStack.indexOf(fn)
+      if (i >= 0) escStack.splice(i, 1)
+    }
   }, [])
 }
 
@@ -105,13 +111,20 @@ export function useEscToClose(handler: () => void) {
 const THEME_KEY = "cluster_ui_theme"
 
 function applyTheme(mode: string) {
-  document.documentElement.dataset.mode = mode
+  // "system" clears the stored override and follows prefers-color-scheme (P2-13)
+  const effective = mode === "system" ? initialSystemTheme() : mode
+  document.documentElement.dataset.mode = effective
   if (!document.documentElement.dataset.theme) {
     document.documentElement.dataset.theme = "kumo"
   }
   try {
-    localStorage.setItem(THEME_KEY, mode)
+    if (mode === "system") localStorage.removeItem(THEME_KEY)
+    else localStorage.setItem(THEME_KEY, mode)
   } catch {}
+}
+
+function initialSystemTheme(): string {
+  return window.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark"
 }
 
 function initialTheme(): string {
@@ -129,31 +142,69 @@ const NAV = [
   { to: "/overview", label: "Overview", icon: SquaresFour },
   { to: "/runners", label: "Runners", icon: Cpu },
   { to: "/shards", label: "Shards", icon: GridFour },
+  { to: "/queues", label: "Queues", icon: QueueIcon },
   { to: "/entities", label: "Entities", icon: Cube },
   { to: "/workflows", label: "Workflows", icon: FlowArrow },
   { to: "/crons", label: "Crons", icon: ClockCounterClockwise },
   { to: "/traces", label: "Traces", icon: Stack },
-  { to: "/queues", label: "Queues", icon: QueueIcon },
   { to: "/singletons", label: "Singletons", icon: CirclesThree },
   { to: "/messages", label: "Messages", icon: ListDashes },
   { to: "/agent", label: "AI Chat", icon: Sparkle },
   { to: "/mcp", label: "MCP", icon: Plugs }
 ]
 
-const NAV_GROUP_CLUSTER = new Set(["/overview", "/runners", "/shards"])
-const NAV_GROUP_WORK = new Set(["/entities", "/workflows", "/crons", "/queues", "/traces", "/singletons", "/messages"])
+/** IA regroup (UX review): Work had 7 entries — split into balanced groups. */
+const NAV_GROUPS: Array<{ label: string; paths: string[] }> = [
+  { label: "Cluster", paths: ["/overview"] },
+  { label: "Infra", paths: ["/runners", "/shards", "/queues"] },
+  { label: "Work", paths: ["/entities", "/workflows", "/crons"] },
+  { label: "Observe", paths: ["/traces", "/singletons", "/messages"] },
+  { label: "Tools", paths: ["/agent", "/mcp"] }
+]
 
 function FreshnessIndicator() {
   const { secondsAgo } = useFreshness()
   if (secondsAgo === null) return null
   const stale = secondsAgo > 15
+  const title = stale ? "no successful refresh recently" : "last successful refresh"
   return (
-    <span
-      className={cn("hidden text-[11px] tabular-nums sm:inline", stale ? "text-kumo-warning" : "text-kumo-inactive")}
-      title={stale ? "no successful refresh recently" : "last successful refresh"}
+    <>
+      {/* mobile: icon-only freshness dot (P1-12) */}
+      <span
+        aria-hidden="true"
+        title={title}
+        className={cn("inline-block h-2 w-2 rounded-full sm:hidden", stale ? "bg-kumo-warning" : "bg-kumo-success")}
+      />
+      <span
+        className={cn("hidden text-[11px] tabular-nums sm:inline", stale ? "text-kumo-warning" : "text-kumo-subtle")}
+        title={title}
+      >
+        updated {secondsAgo}s ago
+      </span>
+    </>
+  )
+}
+
+/** Thin indeterminate activity bar shown while any API request is in flight (P1-12). */
+function NetActivityBar() {
+  const [pending, setPending] = React.useState(0)
+  React.useEffect(() => {
+    const onNet = (e: Event) => {
+      const delta = (e as CustomEvent).detail?.delta ?? 0
+      setPending((n) => Math.max(0, n + delta))
+    }
+    window.addEventListener("ui:net", onNet)
+    return () => window.removeEventListener("ui:net", onNet)
+  }, [])
+  if (pending === 0) return null
+  return (
+    <div
+      role="progressbar"
+      aria-label="loading data"
+      className="h-0.5 w-full overflow-hidden bg-transparent"
     >
-      updated {secondsAgo}s ago
-    </span>
+      <div className="h-full w-1/3 animate-[net-slide_1s_ease-in-out_infinite] bg-kumo-brand/70" />
+    </div>
   )
 }
 
@@ -196,8 +247,7 @@ function TopBar({ base, onMenu, onOpenPalette }: { base: string; onMenu: () => v
   }, [clusters, cluster])
 
   const pickTheme = () => {
-    const next =
-      (document.documentElement.dataset.mode ?? initialTheme()) === "dark" ? "light" : "dark"
+    const next = (document.documentElement.dataset.mode ?? initialTheme()) === "dark" ? "light" : "dark"
     applyTheme(next)
   }
 
@@ -258,9 +308,13 @@ function TopBar({ base, onMenu, onOpenPalette }: { base: string; onMenu: () => v
         onClick={pickTheme}
         title="toggle light/dark"
         aria-label="toggle light/dark theme"
-        className="grid h-7 w-7 place-items-center rounded-md text-kumo-subtle hover:bg-kumo-tint hover:text-kumo-default cursor-pointer"
+        className="grid h-7 w-7 cursor-pointer place-items-center rounded-md text-kumo-subtle hover:bg-kumo-tint hover:text-kumo-default"
       >
-        ◐
+        {(document.documentElement.dataset.mode ?? initialTheme()) === "dark" ? (
+          <Sun className="h-4 w-4" />
+        ) : (
+          <Moon className="h-4 w-4" />
+        )}
       </button>
 
       {/* hidden marker keeps keyboard shortcut logic aware of current section */}
@@ -273,6 +327,14 @@ export function Shell({ route, children }: { route: string; children: React.Reac
   const base = "/" + (route.split("?")[0].split("/")[1] ?? "overview")
   const [navOpen, setNavOpen] = React.useState(false)
   const [paletteOpen, setPaletteOpen] = React.useState(false)
+  const [clusterNames, setClusterNames] = React.useState<string[]>([])
+
+  React.useEffect(() => {
+    api
+      .config()
+      .then((cfg) => setClusterNames(cfg.clusters ?? []))
+      .catch(() => {})
+  }, [])
 
   // ⌘K / Ctrl+K opens the command palette
   React.useEffect(() => {
@@ -295,18 +357,20 @@ export function Shell({ route, children }: { route: string; children: React.Reac
         hint: NAV.findIndex((x) => x.to === n.to) < 9 ? String(NAV.findIndex((x) => x.to === n.to) + 1) : undefined,
         run: () => navigate(n.to)
       })),
-      {
-        key: "theme-light",
-        label: "Theme: light",
-        keywords: "appearance dark mode toggle",
-        run: () => applyTheme("light")
-      },
-      {
-        key: "theme-dark",
-        label: "Theme: dark",
-        keywords: "appearance light mode toggle",
-        run: () => applyTheme("dark")
-      },
+      // cluster switching as first-class commands (P1-11 / P1-2); the current
+      // cluster is filtered out so only actual switches are offered
+      ...clusterNames
+        .filter((name) => name !== getCluster())
+        .map((name) => ({
+          key: `cluster-${name}`,
+          label: `Switch to cluster ${name}`,
+          keywords: "cluster switch change environment",
+          run: () => {
+            setCluster(name)
+            live.triggerRefresh()
+            toast.success(`Switched to cluster ${name}`)
+          }
+        })),
       {
         key: "theme-toggle",
         label: "Theme: toggle light/dark",
@@ -317,26 +381,42 @@ export function Shell({ route, children }: { route: string; children: React.Reac
           )
       },
       {
+        key: "theme-system",
+        label: "Theme: follow system",
+        keywords: "appearance system default automatic",
+        run: () => applyTheme("system")
+      },
+      {
         key: "live-pause-toggle",
         label: live.isPaused() ? "Live refresh: resume" : "Live refresh: pause",
         keywords: "auto-refresh polling pause resume",
         run: () => live.setPaused(!live.isPaused())
       }
     ],
-    []
+    [clusterNames]
   )
   const dynamicItems = React.useCallback(
     (query: string): PaletteItem[] => {
+      const items: PaletteItem[] = []
       // all-digit snowflake id → deep link into messages search
-      if (!/^\d{10,}$/.test(query)) return []
-      return [
-        {
+      if (/^\d{10,}$/.test(query)) {
+        items.push({
           key: "open-message",
           label: `Open message ${query}`,
           keywords: "message id search",
           run: () => navigate(`/messages?q=${encodeURIComponent(query)}`)
-        }
-      ]
+        })
+      }
+      // hex-ish trace id → trace detail route (P1-15)
+      if (/^[0-9a-f]{8,64}$/i.test(query)) {
+        items.push({
+          key: "open-trace",
+          label: `Open trace ${query.slice(0, 16)}${query.length > 16 ? "…" : ""}`,
+          keywords: "trace id search",
+          run: () => navigate(`/traces/${encodeURIComponent(query)}`)
+        })
+      }
+      return items
     },
     []
   )
@@ -362,7 +442,8 @@ export function Shell({ route, children }: { route: string; children: React.Reac
           target.tagName === "SELECT" ||
           target.isContentEditable)
       if (e.key === "Escape") {
-        window.dispatchEvent(new CustomEvent("ui:esc"))
+        // only the topmost Esc surface closes (P2-9)
+        escStack[escStack.length - 1]?.()
         return
       }
       if (typing || e.metaKey || e.ctrlKey || e.altKey) return
@@ -400,6 +481,16 @@ export function Shell({ route, children }: { route: string; children: React.Reac
       dynamicItems={dynamicItems}
     />
     </>
+  )
+}
+
+/** Page content dims slightly while auto-refresh is paused (P1-12). */
+function PausedAwareMain({ children }: { children: React.ReactNode }) {
+  const [paused] = live.usePaused()
+  return (
+    <main className={cn("min-h-0 flex-1 overflow-y-auto p-5 transition-opacity", paused && "opacity-70")}>
+      {children}
+    </main>
   )
 }
 
@@ -456,25 +547,21 @@ function ShellLayout({
 
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar base={base} onMenu={onMenu} onOpenPalette={onOpenPalette} />
+        <NetActivityBar />
         {busDown && (
           <div className="border-b border-kumo-warning/30 bg-kumo-warning-tint px-4 py-1.5 text-[12px] text-kumo-warning">
             Live updates unavailable — retrying…
           </div>
         )}
-        <main className="min-h-0 flex-1 overflow-y-auto p-5">{children}</main>
+        <PausedAwareMain>{children}</PausedAwareMain>
       </div>
     </div>
   )
 }
 
 function SidebarContent({ base, onNavigate }: { base: string; onNavigate?: () => void }) {
-  React.useEffect(() => {
-    const closeOnEsc = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onNavigate?.()
-    }
-    window.addEventListener("keydown", closeOnEsc)
-    return () => window.removeEventListener("keydown", closeOnEsc)
-  }, [onNavigate])
+  // topmost-Esc closes the drawer (P2-9) — registered when the drawer mounts
+  useEscToClose(() => onNavigate?.())
 
   return (
     <>
@@ -488,13 +575,20 @@ function SidebarContent({ base, onNavigate }: { base: string; onNavigate?: () =>
           </div>
         </div>
         <nav className="mt-2 flex flex-1 flex-col gap-4 px-2">
-          <NavGroup label="Cluster" base={base} items={NAV.filter((n) => NAV_GROUP_CLUSTER.has(n.to))} onNavigate={onNavigate} />
-          <NavGroup label="Work" base={base} items={NAV.filter((n) => NAV_GROUP_WORK.has(n.to))} onNavigate={onNavigate} />
+          {NAV_GROUPS.map((group) => (
+            <NavGroup
+              key={group.label}
+              label={group.label}
+              base={base}
+              items={NAV.filter((n) => group.paths.includes(n.to))}
+              onNavigate={onNavigate}
+            />
+          ))}
         </nav>
         <div className="border-t border-kumo-line px-4 py-3 text-[11px] leading-4 text-kumo-subtle">
           reads the cluster's SQL storage
           <br />
-          <span className="text-kumo-inactive">1–9 switch · ⌘K palette · / search · esc close</span>
+          <span className="text-kumo-subtle">1–9 switch · ⌘K palette · / search · esc close</span>
         </div>
     </>
   )
@@ -513,7 +607,7 @@ function NavGroup({
 }) {
   return (
     <div>
-      <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-kumo-inactive">
+      <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-kumo-subtle">
         {label}
       </div>
       <nav className="flex flex-col gap-0.5">
@@ -538,7 +632,7 @@ function NavGroup({
                 className={cn("h-4 w-4 shrink-0", active ? "text-kumo-brand" : "opacity-80")}
               />
               <span className="flex-1">{item.label}</span>
-              <kbd className="hidden text-[10px] text-kumo-inactive group-hover:inline">
+              <kbd className="hidden text-[10px] text-kumo-subtle group-hover:inline">
                 {NAV.findIndex((n) => n.to === item.to) + 1}
               </kbd>
             </Link>
