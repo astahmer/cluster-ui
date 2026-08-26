@@ -50,7 +50,8 @@ export function WorkflowRunPage({
   const [busy, setBusy] = React.useState(false)
   const [timelineOpen, setTimelineOpen] = React.useState(true)
   const [view, setView] = React.useState<"timeline" | "graph">("timeline")
-  const readonly = useAppConfig()?.readonly === true
+  const appConfig = useAppConfig()
+  const readonly = appConfig?.readonly === true || appConfig?.role === "viewer"
 
   const run = data?.run ?? null
   const extras = (run ?? null) as (WorkflowRunDetail["run"] & RunExtras) | null

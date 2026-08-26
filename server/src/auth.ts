@@ -7,7 +7,8 @@ export const AUTH_COOKIE = "cluster_ui_token"
 function isExempt(url: string): boolean {
   const path = url.split("?")[0]
   // /healthz, static assets, SPA fallback — everything outside /api/*
-  if (!path.startsWith("/api/")) return true
+  // /mcp is an agent endpoint and must be protected when token auth is enabled.
+  if (!path.startsWith("/api/") && path !== "/mcp") return true
   if (path === "/api/auth") return true
   return false
 }

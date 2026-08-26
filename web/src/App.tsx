@@ -13,6 +13,7 @@ import { TracesPage, TraceDetailPage } from "./pages/Traces.tsx"
 import { AgentPage } from "./pages/Agent.tsx"
 import { McpPage } from "./pages/Mcp.tsx"
 import { QueuesPage } from "./pages/Queues.tsx"
+import { OperationsPage } from "./pages/Operations.tsx"
 
 /**
  * MessagesPage supports initialFilters (CONTRACT.md W2) and messageId
@@ -101,6 +102,9 @@ export function App() {
         break
       case "mcp":
         content = <McpPage />
+        break
+      case "operations":
+        content = <OperationsPage />
         break
       case "queues":
         content = <QueuesPage />

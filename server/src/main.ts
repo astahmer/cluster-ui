@@ -7,6 +7,7 @@ import { api, clusterRepos } from "./api.ts"
 import { authorization } from "./auth.ts"
 import { config } from "./config.ts"
 import * as metrics from "./metrics.ts"
+import { startAlertMonitor } from "./ops.ts"
 
 const ServerLive = NodeHttpServer.layer(() => createServer(), {
   port: config.port,
@@ -23,6 +24,7 @@ const Main = app.pipe(
   Layer.launch
 )
 
+startAlertMonitor(clusterRepos)
 NodeRuntime.runMain(Main)
 
 // Exit abruptly on signals: letting node unwind naturally finalizes

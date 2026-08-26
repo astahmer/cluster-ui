@@ -22,7 +22,7 @@ export function QueuesPage() {
   const [cleanFor, setCleanFor] = React.useState<QueueInfo | null>(null)
   const [browseQueue, setBrowseQueue] = React.useState<string | null>(null)
   const config = useAppConfig()
-  const readonly = config?.readonly === true
+  const readonly = config?.readonly === true || config?.role === "viewer"
 
   if (loading && queues.length === 0) return <SkeletonTable />
 

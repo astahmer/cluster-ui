@@ -170,6 +170,31 @@ export interface AppConfig {
   tracingUrlTemplate: string | null
   /** true when the server runs with CLUSTER_UI_READONLY — every write action 403s */
   readonly?: boolean
+  role?: "viewer" | "operator" | "admin"
+} 
+
+export type AlertMetric = "failed" | "pending" | "scheduled" | "inflight" | "unassignedShards" | "runners"
+export type AlertOperator = "gt" | "gte" | "eq"
+export interface AlertRule {
+  id: string
+  name: string
+  cluster: string
+  metric: AlertMetric
+  operator: AlertOperator
+  threshold: number
+  durationMs: number
+  webhookUrl: string
+  enabled: boolean
+  lastTriggeredAt: number | null
+}
+export interface AuditEntry {
+  timestamp: number
+  actor: string
+  role: "viewer" | "operator" | "admin"
+  action: string
+  cluster: string
+  target: string
+  success: true
 }
 
 export interface JobTreeNode {
@@ -295,6 +320,14 @@ function post<T>(path: string, body: unknown): Promise<T> {
     body: JSON.stringify(body)
   })
 }
+function patch<T>(path: string, body: unknown): Promise<T> {
+  return request<T>(path, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body)
+  })
+}
+function remove<T>(path: string): Promise<T> { return request<T>(path, { method: "DELETE" }) }
 
 /* ----------------------------------------------------------------- client -- */
 
@@ -497,6 +530,12 @@ export const api = {
       "/api/metrics/history" + (opts?.rangeMs ? `?rangeMs=${opts.rangeMs}` : "")
     ),
   config: () => get<AppConfig>("/api/config"),
+  alerts: () => get<AlertRule[]>("/api/alerts"),
+  createAlert: (rule: Omit<AlertRule, "id" | "lastTriggeredAt">) => post<AlertRule>("/api/alerts", rule),
+  updateAlert: (id: string, rule: Partial<AlertRule>) => patch<AlertRule>(`/api/alerts/${encodeURIComponent(id)}`, rule),
+  deleteAlert: (id: string) => remove<{ ok: boolean }>(`/api/alerts/${encodeURIComponent(id)}`),
+  testAlert: (id: string) => post<{ ok: true }>(`/api/alerts/${encodeURIComponent(id)}/test`, {}),
+  audit: (limit = 100) => get<AuditEntry[]>(`/api/audit?limit=${limit}`),
   clusters: () => get<{ name: string }[]>("/api/clusters"),
 
   messages: (q: MessagesQuery) =>

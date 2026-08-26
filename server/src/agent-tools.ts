@@ -1,6 +1,7 @@
 import { z } from "zod"
 import { ActionError, assertWritable, deleteMessage, interruptMessage, resetActivity, retryMessage } from "./actions.ts"
 import { config } from "./config.ts"
+import { requireOperator } from "./ops.ts"
 import type { Repo } from "./queries.ts"
 import { queryRunnerState } from "./singletons.ts"
 
@@ -145,6 +146,7 @@ async function runWrite(repo: Repo, action: WriteAction, messageId: string): Pro
     }
   ).actions
   assertWritable(config.readonly)
+  requireOperator()
   if (redisActions && (action === "retry" || action === "delete")) {
     const fn = redisActions[action]
     if (!fn) throw new ActionError(`${action} not supported for this cluster`, 400)

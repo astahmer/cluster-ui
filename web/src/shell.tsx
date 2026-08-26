@@ -1,5 +1,5 @@
 import * as React from "react"
-import { SquaresFour, Cpu, GridFour, Cube, ClockCounterClockwise, FlowArrow, ListDashes, CirclesThree, List, Stack, Sparkle, Plugs, MagnifyingGlass, QueueIcon, Moon, Sun } from "@phosphor-icons/react"
+import { SquaresFour, Cpu, GridFour, Cube, ClockCounterClockwise, FlowArrow, ListDashes, CirclesThree, List, Stack, Sparkle, Plugs, MagnifyingGlass, QueueIcon, Moon, Sun, Wrench } from "@phosphor-icons/react"
 import { api, getCluster, onClusterChange, setCluster } from "./api.ts"
 import { useAppConfig } from "./config.ts"
 import { toast } from "./toast.tsx"
@@ -175,7 +175,8 @@ const NAV = [
   { to: "/singletons", label: "Runtime", icon: CirclesThree },
   { to: "/messages", label: "Messages", icon: ListDashes },
   { to: "/agent", label: "AI Chat", icon: Sparkle },
-  { to: "/mcp", label: "MCP", icon: Plugs }
+  { to: "/mcp", label: "MCP", icon: Plugs },
+  { to: "/operations", label: "Operations", icon: Wrench }
 ]
 
 /** IA regroup (UX review): Work had 7 entries — split into balanced groups. */
@@ -184,7 +185,7 @@ const NAV_GROUPS: Array<{ label: string; paths: string[] }> = [
   { label: "Infra", paths: ["/runners", "/shards", "/queues"] },
   { label: "Work", paths: ["/entities", "/workflows", "/crons"] },
   { label: "Observe", paths: ["/traces", "/singletons", "/messages"] },
-  { label: "Tools", paths: ["/agent", "/mcp"] }
+  { label: "Tools", paths: ["/agent", "/mcp", "/operations"] }
 ]
 
 function FreshnessIndicator() {

@@ -55,7 +55,13 @@ async function run() {
 async function runChecks() {
   await check("healthz", "/healthz", () => true)
   const cfg = await check("config", "/api/config", (b) =>
-    Array.isArray(b.clusters) && b.clusters.length > 0 && "readonly" in b)
+    Array.isArray(b.clusters) && b.clusters.length > 0 && "readonly" in b && ["viewer", "operator", "admin"].includes(b.role))
+  await check("alerts list", "/api/alerts", (b) => Array.isArray(b))
+  const badAlert = await fetch(`http://127.0.0.1:${PORT}/api/alerts`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "invalid", cluster: "default", metric: "failed", operator: "gte", threshold: 1, durationMs: 0, webhookUrl: "http://127.0.0.1" }) })
+  const badAlertOk = badAlert.status === 400
+  console.log(`${badAlertOk ? "✓" : "✗"} alert webhook validation`)
+  if (!badAlertOk) failures++
+  await check("audit list", "/api/audit?limit=5", (b) => Array.isArray(b))
   await check("clusters", "/api/clusters", (b) => Array.isArray(b) && b[0].name)
   const ov = await check("overview", "/api/overview", (b) =>
     typeof b.messages?.pending === "number" && typeof b.messages?.failed === "number" &&
@@ -349,7 +355,10 @@ async function runChecks() {
     const goodTok = await fetch(`http://127.0.0.1:${AUTH_PORT}/api/overview`, {
       headers: { authorization: "Bearer secret-token" }
     })
-    const authOk = noTok.status === 401 && badTok.status === 401 && goodTok.status === 200
+    const roleBody = await fetch(`http://127.0.0.1:${AUTH_PORT}/api/config`, {
+      headers: { authorization: "Bearer secret-token" }
+    }).then((r) => r.json())
+    const authOk = noTok.status === 401 && badTok.status === 401 && goodTok.status === 200 && roleBody.role === "operator"
     console.log(`${authOk ? "✓" : "✗"} token auth (401/401/200)`)
     if (!authOk) failures++
 

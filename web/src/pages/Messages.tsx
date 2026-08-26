@@ -104,7 +104,7 @@ export function MessagesPage({
   const [bulkBusy, setBulkBusy] = React.useState(false)
 
   const config = useAppConfig()
-  const readonly = config?.readonly === true
+  const readonly = config?.readonly === true || config?.role === "viewer"
   const detail = useMessageDetail(openId)
   useEscToClose(() => setOpenId(null))
   // stop background polling while the detail panel is open so it doesn't rerender under the cursor
@@ -591,7 +591,7 @@ function MessageRow({
             type="button"
             title={config?.readonly ? "read-only mode" : "delete message"}
             aria-label={`delete message ${m.id}`}
-            disabled={config?.readonly === true}
+            disabled={config?.readonly === true || config?.role === "viewer"}
             className="cursor-pointer rounded p-1.5 text-kumo-subtle hover:bg-kumo-danger-tint hover:text-kumo-danger disabled:cursor-not-allowed disabled:opacity-40"
             onClick={(e) => {
               e.stopPropagation()
@@ -664,7 +664,7 @@ function MessageDetailBody({
   onChanged: () => void
 }) {
   const m = d.message
-  const readonly = config?.readonly === true
+  const readonly = config?.readonly === true || config?.role === "viewer"
   const [busy, setBusy] = React.useState(false)
 
   const act = async (fn: () => Promise<unknown>, what: string) => {

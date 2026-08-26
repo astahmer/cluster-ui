@@ -15,6 +15,7 @@ import { makeRedisRepo } from "./redis-repo.ts"
 import { queryRunnerFibers, queryRunnerLogs } from "./singletons.ts"
 import { makeRepo, openDb, type MessageQuery, type Repo } from "./queries.ts"
 import { queryRunnerState } from "./singletons.ts"
+import { actor, createAlert, deleteAlert, listAlerts, listAudit, recordAudit, role, testAlert, updateAlert } from "./ops.ts"
 
 // ------------------------------------------------------------- cluster registry
 const repos = new Map<string, Repo>(
@@ -191,6 +192,7 @@ function actionHandler(
     Effect.tryPromise(async (): Promise<HttpServerResponse.HttpServerResponse> => {
       try {
         assertWritable(config.readonly)
+        if (role === "viewer") throw new ActionError("operator role required", 403)
         const repo = repoFor(p.cluster ?? p.body?.cluster)
         if (!repo) return notFound("cluster")
         const messageId = p.body?.messageId
@@ -198,6 +200,7 @@ function actionHandler(
           return HttpServerResponse.unsafeJson({ error: "messageId is required" }, { status: 400 })
         }
         await dispatchAction(repo, redisName ?? "retry", run, messageId)
+        recordAudit({ actor, role, action: redisName ?? "retry", cluster: p.cluster ?? p.body?.cluster ?? config.clusters[0].name, target: messageId })
         return json({ ok: true })
       } catch (e) {
         if (e instanceof ActionError) {
@@ -222,6 +225,7 @@ const BULK_ACTIONS = {
 const bulkActionHandler = Effect.map(reqWithBody, (p): HttpServerResponse.HttpServerResponse => {
   try {
     assertWritable(config.readonly)
+    if (role === "viewer") throw new ActionError("operator role required", 403)
     const repo = repoFor(p.cluster ?? p.body?.cluster)
     if (!repo) return notFound("cluster")
     const action = p.body?.action
@@ -250,6 +254,9 @@ const bulkActionHandler = Effect.map(reqWithBody, (p): HttpServerResponse.HttpSe
         }
       }
     })
+    if (results.some((result) => result.ok)) {
+      recordAudit({ actor, role, action: `bulk:${String(action)}`, cluster: p.cluster ?? p.body?.cluster ?? config.clusters[0].name, target: `${results.filter((result) => result.ok).length} messages` })
+    }
     return json({ results })
   } catch (e) {
     if (e instanceof ActionError) {
@@ -262,6 +269,58 @@ const bulkActionHandler = Effect.map(reqWithBody, (p): HttpServerResponse.HttpSe
   }
 })
 
+const opsRouter = HttpRouter.empty.pipe(
+  HttpRouter.get("/api/alerts", Effect.succeed(json(listAlerts()))),
+  HttpRouter.post("/api/alerts", Effect.flatMap(reqWithBody, (p) => Effect.sync(() => {
+    try {
+      assertWritable(config.readonly)
+      if (role === "viewer") throw new ActionError("operator role required", 403)
+      const rule = createAlert(p.body)
+      recordAudit({ actor, role, action: "alert-create", cluster: rule.cluster, target: rule.id })
+      return json(rule)
+    } catch (e) {
+      return HttpServerResponse.unsafeJson({ error: e instanceof Error ? e.message : String(e) }, { status: e instanceof ActionError ? e.status : 400 })
+    }
+  }))),
+  HttpRouter.patch("/api/alerts/:id", Effect.flatMap(reqWithBody, (p) => Effect.sync(() => {
+    try {
+      assertWritable(config.readonly)
+      if (role === "viewer") throw new ActionError("operator role required", 403)
+      const rule = updateAlert(decodeURIComponent(p.id!), p.body)
+      if (!rule) return notFound("alert")
+      recordAudit({ actor, role, action: "alert-update", cluster: rule.cluster, target: rule.id })
+      return json(rule)
+    } catch (e) {
+      return HttpServerResponse.unsafeJson({ error: e instanceof Error ? e.message : String(e) }, { status: e instanceof ActionError ? e.status : 400 })
+    }
+  }))),
+  HttpRouter.del("/api/alerts/:id", Effect.flatMap(req, (p) => Effect.sync(() => {
+    try {
+      assertWritable(config.readonly)
+      if (role === "viewer") throw new ActionError("operator role required", 403)
+      const id = decodeURIComponent(p.id!)
+      const ok = deleteAlert(id)
+      if (ok) recordAudit({ actor, role, action: "alert-delete", cluster: "*", target: id })
+      return json({ ok })
+    } catch (e) {
+      return HttpServerResponse.unsafeJson({ error: e instanceof Error ? e.message : String(e) }, { status: e instanceof ActionError ? e.status : 400 })
+    }
+  }))),
+  HttpRouter.post("/api/alerts/:id/test", Effect.flatMap(req, (p) => Effect.tryPromise(async () => {
+    try {
+      assertWritable(config.readonly)
+      if (role === "viewer") throw new ActionError("operator role required", 403)
+      const id = decodeURIComponent(p.id!)
+      const result = await testAlert(id)
+      recordAudit({ actor, role, action: "alert-test", cluster: "*", target: id })
+      return json(result)
+    } catch (e) {
+      return HttpServerResponse.unsafeJson({ error: e instanceof Error ? e.message : String(e) }, { status: e instanceof ActionError ? e.status : 400 })
+    }
+  }))),
+  HttpRouter.get("/api/audit", Effect.flatMap(req, (p) => Effect.succeed(json(listAudit(intParam(p.limit))))))
+)
+
 const baseRouter = HttpRouter.empty.pipe(
   HttpRouter.get("/healthz", HttpServerResponse.text("ok")),
 
@@ -272,7 +331,8 @@ const baseRouter = HttpRouter.empty.pipe(
         clusters: [...repos.keys()],
         clusterKinds: config.clusters.map((c) => ({ name: c.name, kind: c.kind })),
         tracingUrlTemplate: config.tracingUrlTemplate,
-        readonly: config.readonly
+        readonly: config.readonly,
+        role
       })
     )
   ),
@@ -452,10 +512,12 @@ function redisOnlyHandler(
     Effect.tryPromise(async (): Promise<HttpServerResponse.HttpServerResponse> => {
       try {
         assertWritable(config.readonly)
+        if (role === "viewer") throw new ActionError("operator role required", 403)
         const repo = repoFor(p.cluster ?? p.body?.cluster)
         if (!repo) return notFound("cluster")
         if (repo.db === null) {
           const result = await run(repo as never, p.body ?? {})
+          recordAudit({ actor, role, action: "redis-operation", cluster: p.cluster ?? p.body?.cluster ?? config.clusters[0].name, target: typeof p.body?.queue === "string" ? p.body.queue : typeof p.body?.id === "string" ? p.body.id : "redis" })
           return json(result)
         }
         return HttpServerResponse.unsafeJson(
@@ -680,7 +742,7 @@ const agentRouter = HttpRouter.empty.pipe(
   )
 )
 
-export const api = HttpRouter.concat(HttpRouter.concat(baseRouter, redisRouter), agentRouter).pipe(
+export const api = HttpRouter.concat(HttpRouter.concat(HttpRouter.concat(baseRouter, opsRouter), redisRouter), agentRouter).pipe(
   // Prometheus scrape endpoint — outside /api/* so the auth middleware's
   // static exemption covers it (same treatment as /healthz)
   HttpRouter.get(

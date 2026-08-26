@@ -3,6 +3,7 @@ dist/
 data/*.db
 data/*.db-wal
 data/*.db-shm
+data/cluster-ui-state.json
 *.log
 .DS_Store
 .direnv/
