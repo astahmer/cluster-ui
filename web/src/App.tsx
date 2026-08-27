@@ -37,6 +37,18 @@ const SeededMessagesPage = MessagesPage as unknown as React.ComponentType<{
 
 const TypedEntityInstances = EntityInstancesPage as React.ComponentType<{ entityType: string }>
 
+const traceListQueryKeys = ["q", "page", "pageSize", "service", "status", "minDurationMs", "sort", "createdAfter", "createdBefore"]
+
+const traceListPath = (params: URLSearchParams): string => {
+  const listParams = new URLSearchParams()
+  for (const key of traceListQueryKeys) {
+    const value = params.get(key)
+    if (value) listParams.set(key, value)
+  }
+  const query = listParams.toString()
+  return `/traces${query ? `?${query}` : ""}`
+}
+
 function AuthGate({ children }: { children: React.ReactNode }) {
   const [required, setRequired] = React.useState(false)
   const [token, setTokenValue] = React.useState("")
@@ -102,17 +114,15 @@ export function App() {
         content = <CronsPage />
         break
       case "traces":
-        content =
-          parts.length >= 2 ? (
-            <TraceDetailPage key={parts[1]} traceId={decodeURIComponent(parts[1])} />
-          ) : (
-            <TracesPage
-              initialFilters={{
-                createdAfter: route.params.get("createdAfter") ?? undefined,
-                createdBefore: route.params.get("createdBefore") ?? undefined
-              }}
-            />
-          )
+        {
+          const traceId = parts.length >= 2 ? decodeURIComponent(parts[1]) : null
+          if (traceId === null) {
+            content = <TracesPage />
+          } else {
+            const detailPath = `/traces/${encodeURIComponent(traceId)}${route.params.toString() ? `?${route.params.toString()}` : ""}`
+            content = <TraceDetailPage key={parts[1]} traceId={traceId} listHref={traceListPath(route.params)} returnTo={detailPath} />
+          }
+        }
         break
       case "singletons":
         content = <SingletonsPage />

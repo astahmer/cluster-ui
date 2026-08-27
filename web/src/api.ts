@@ -407,6 +407,9 @@ export interface TraceSummary {
   lastAt: number
 }
 
+export type TraceSort = "newest" | "oldest" | "duration" | "spans" | "failures"
+export type TraceStatusFilter = "all" | "healthy" | "failed"
+
 /** Paged trace listing (UX P1-15). */
 export interface TraceList {
   rows: TraceSummary[]
@@ -482,7 +485,7 @@ export const api = {
       )}`
     ),
   crons: () => get<CronJob[]>("/api/crons"),
-  traces: (q?: { limit?: number; offset?: number; search?: string; createdAfter?: number; createdBefore?: number; cluster?: string }) =>
+  traces: (q?: { limit?: number; offset?: number; search?: string; service?: string; status?: TraceStatusFilter; minDurationMs?: number; sort?: TraceSort; createdAfter?: number; createdBefore?: number; cluster?: string }) =>
     get<TraceList>(
       "/api/traces?" +
         new URLSearchParams(
@@ -490,6 +493,10 @@ export const api = {
             limit: q?.limit,
             offset: q?.offset,
             q: q?.search,
+            service: q?.service,
+            status: q?.status === "all" ? undefined : q?.status,
+            minDurationMs: q?.minDurationMs,
+            sort: q?.sort === "newest" ? undefined : q?.sort,
             createdAfter: q?.createdAfter,
             createdBefore: q?.createdBefore,
             cluster: q?.cluster

@@ -451,7 +451,7 @@ export function rowInteractions(onOpen: () => void): {
  * Writes go through history.replaceState so nothing remounts; external hash
  * changes (nav, back button) stay in sync.
  */
-export function useHashParam(key: string): [string, (value: string) => void] {
+export function useHashParam(key: string): [string, (value: string, options?: { history?: "replace" | "push" }) => void] {
   const read = React.useCallback(() => {
     const raw = window.location.hash.slice(1)
     const q = raw.indexOf("?")
@@ -469,7 +469,7 @@ export function useHashParam(key: string): [string, (value: string) => void] {
   }, [read])
 
   const update = React.useCallback(
-    (next: string) => {
+    (next: string, options?: { history?: "replace" | "push" }) => {
       const raw = window.location.hash.slice(1) || "/overview"
       const qIdx = raw.indexOf("?")
       const path = qIdx === -1 ? raw : raw.slice(0, qIdx)
@@ -477,7 +477,9 @@ export function useHashParam(key: string): [string, (value: string) => void] {
       if (next === "") params.delete(key)
       else params.set(key, next)
       const qs = params.toString()
-      window.history.replaceState(null, "", `#${path}${qs ? `?${qs}` : ""}`)
+      const nextUrl = `#${path}${qs ? `?${qs}` : ""}`
+      if (options?.history === "push") window.history.pushState(null, "", nextUrl)
+      else window.history.replaceState(null, "", nextUrl)
       setValue(next)
     },
     [key]
@@ -534,12 +536,14 @@ export function Pager({
   page,
   total,
   pageSize,
-  onChange
+  onChange,
+  showJump = false
 }: {
   page: number
   total: number
   pageSize: number
   onChange: (p: number) => void
+  showJump?: boolean
 }) {
   const pages = Math.max(1, Math.ceil(total / pageSize))
   if (pages <= 1) return null
@@ -556,6 +560,33 @@ export function Pager({
       <span className="tabular-nums">
         page {page} / {pages}
       </span>
+      {showJump && (
+        <form
+          className="flex items-center gap-1"
+          onSubmit={(event) => {
+            event.preventDefault()
+            const form = new FormData(event.currentTarget)
+            const requested = Number.parseInt(String(form.get("page") ?? ""), 10)
+            if (Number.isFinite(requested)) onChange(Math.min(Math.max(requested, 1), pages))
+          }}
+        >
+          <label htmlFor="pager-page" className="sr-only">Go to page</label>
+          <input
+            key={page}
+            id="pager-page"
+            name="page"
+            type="number"
+            aria-label="Go to page"
+            min={1}
+            max={pages}
+            defaultValue={page}
+            className="h-7 w-14 rounded-md border border-kumo-line bg-kumo-base px-1.5 text-center text-[12px] text-kumo-default"
+          />
+          <button type="submit" className="min-h-[28px] cursor-pointer rounded-md border border-kumo-line px-2 py-1 text-[12px] font-medium text-kumo-default hover:bg-kumo-recessed">
+            go
+          </button>
+        </form>
+      )}
       <button
         type="button"
         className="min-h-[28px] cursor-pointer rounded-md border border-kumo-line px-3 py-1 text-[12px] font-medium text-kumo-default disabled:cursor-not-allowed disabled:opacity-50"

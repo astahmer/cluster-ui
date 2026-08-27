@@ -25,6 +25,8 @@ export interface TimelineSpan {
   durationSource?: "recorded" | "inferred"
   parentKey?: string
   depth?: number
+  critical?: boolean
+  concurrent?: boolean
 }
 
 const TONE_BAR: Record<NonNullable<TimelineSpan["tone"]>, string> = {
@@ -76,27 +78,36 @@ export function SpanWaterfall({
   height,
   zoom = 1,
   selectedKey,
-  onSelect
+  onSelect,
+  collapsedGroups,
+  onToggleGroup
 }: {
   spans: TimelineSpan[]
-  /** minimum height of the tracks area (px); rows size naturally */
+  /** viewport height of the tracks area (px); rows virtualize inside it */
   height?: number
   /** horizontal time-axis scale; values above 1 make short spans easier to inspect */
   zoom?: number
   selectedKey?: string | null
   onSelect?: (span: TimelineSpan) => void
+  collapsedGroups?: ReadonlySet<string>
+  onToggleGroup?: (group: string) => void
 }) {
   const [scrollTop, setScrollTop] = React.useState(0)
   const timed = spans.filter((s) => Number.isFinite(s.startMs))
   if (timed.length === 0) return null
 
   // stable order: groups keep their own blocks, within everything sorts by start
+  const firstByGroup = new Map<string, number>()
+  for (const span of timed) {
+    const group = span.group ?? ""
+    const first = firstByGroup.get(group)
+    if (first === undefined || span.startMs < first) firstByGroup.set(group, span.startMs)
+  }
   const sorted = [...timed].sort((a, b) => {
     if (a.group !== b.group) {
       const ga = a.group ?? ""
       const gb = b.group ?? ""
-      const firstOf = (g: string) => Math.min(...timed.filter((s) => (s.group ?? "") === g).map((s) => s.startMs))
-      return firstOf(ga) - firstOf(gb)
+      return (firstByGroup.get(ga) ?? 0) - (firstByGroup.get(gb) ?? 0)
     }
     return a.startMs - b.startMs
   })
@@ -108,7 +119,7 @@ export function SpanWaterfall({
 
   const ticks = displayTicks(t0, t1)
   const timelineItems: Array<
-    { kind: "header"; label: string } | { kind: "span"; span: TimelineSpan }
+    { kind: "header"; label: string; count: number; collapsed: boolean } | { kind: "span"; span: TimelineSpan }
   > = []
   let lastGroup: string | undefined
   const seenKey = new Set<string>()
@@ -116,9 +127,12 @@ export function SpanWaterfall({
     if (seenKey.has(span.key)) continue
     seenKey.add(span.key)
     if (span.group !== undefined && span.group !== lastGroup) {
-      timelineItems.push({ kind: "header", label: span.group })
+      const groupCount = sorted.filter((candidate) => candidate.group === span.group).length
+      const collapsed = collapsedGroups?.has(span.group) === true
+      timelineItems.push({ kind: "header", label: span.group, count: groupCount, collapsed })
       lastGroup = span.group
     }
+    if (span.group !== undefined && collapsedGroups?.has(span.group)) continue
     timelineItems.push({ kind: "span", span })
   }
   const rowHeight = 30
@@ -165,13 +179,18 @@ export function SpanWaterfall({
             const index = startIndex + offset
             if (item.kind === "header") {
               return (
-                <div
+                <button
                   key={"group-" + item.label + "-" + index}
-                  className="absolute inset-x-0 border-b border-kumo-line pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-kumo-subtle"
+                  type="button"
+                  className="absolute inset-x-0 border-b border-kumo-line pb-0.5 text-left text-[10px] font-semibold uppercase tracking-wider text-kumo-subtle hover:text-kumo-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-kumo-brand"
                   style={{ top: index * rowHeight + 8, height: rowHeight }}
+                  aria-expanded={!item.collapsed}
+                  aria-label={`${item.collapsed ? "expand" : "collapse"} ${item.label} group`}
+                  onClick={() => onToggleGroup?.(item.label)}
                 >
-                  {item.label}
-                </div>
+                  <span aria-hidden="true" className="mr-1 inline-block w-3">{item.collapsed ? "▸" : "▾"}</span>
+                  {item.label} <span className="font-normal normal-case tracking-normal">({item.count})</span>
+                </button>
               )
             }
             const s = item.span
@@ -183,7 +202,7 @@ export function SpanWaterfall({
             }`
 
             const selected = selectedKey === s.key
-            const rowLabel = `${typeof s.label === "string" || typeof s.label === "number" ? s.label : "span"} · ${axisLabel(s.endMs - s.startMs).replace(/^\+/, "")} · ${s.tone === "danger" ? "failed" : s.tone === "success" ? "completed" : "active"}`
+            const rowLabel = `${s.detail ?? "span"} · ${axisLabel(s.endMs - s.startMs).replace(/^\+/, "")} · ${s.tone === "danger" ? "failed" : s.tone === "success" ? "completed" : "active"}${s.critical ? " · critical path" : ""}${s.concurrent ? " · overlaps another span" : ""}`
 
             return (
               <div key={s.key} className="absolute inset-x-0" style={{ top: index * rowHeight, height: rowHeight }}>
@@ -196,11 +215,15 @@ export function SpanWaterfall({
                   title={tip}
                   aria-label={rowLabel}
                   aria-pressed={selected}
+                  data-duration-source={s.durationSource ?? "inferred"}
                   onClick={() => onSelect?.(s)}
                 >
-                  <span className="flex w-[276px] shrink-0 items-center gap-1.5 truncate pl-1 text-left text-[11px] text-kumo-subtle" style={{ paddingLeft: `${Math.max(4, (s.depth ?? 0) * 12 + 4)}px` }}>
+                  <span className={cn("sticky left-0 z-[1] flex w-[276px] shrink-0 items-center gap-1.5 truncate bg-kumo-base py-0.5 pl-1 text-left text-[11px] text-kumo-subtle group-hover:bg-kumo-tint/60", selected && "bg-kumo-tint/80")} style={{ paddingLeft: `${Math.max(4, (s.depth ?? 0) * 12 + 4)}px` }}>
+                    {(s.depth ?? 0) > 0 && <span aria-hidden="true" className="text-kumo-inactive">↳</span>}
                     <span className="truncate">{s.label}</span>
                     {s.badge}
+                    {s.critical && <span title="critical path" className="shrink-0 text-[9px] text-kumo-link">critical</span>}
+                    {s.concurrent && <span title="overlaps another span" className="shrink-0 text-[10px] text-kumo-inactive">∥</span>}
                   </span>
                   <div className="relative h-4 flex-1">
                     {/* vertical gridlines */}
@@ -217,6 +240,7 @@ export function SpanWaterfall({
                         className={cn(
                           "absolute top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rotate-45 ring-2 ring-transparent",
                           selected && "ring-kumo-default",
+                          s.critical && "ring-kumo-link",
                           TONE_BAR[s.tone ?? "default"]
                         )}
                         style={{ left: `${left}%` }}
@@ -226,6 +250,7 @@ export function SpanWaterfall({
                         className={cn(
                           "absolute top-1/2 h-2.5 -translate-y-1/2 rounded-sm ring-2 ring-transparent",
                           selected && "ring-kumo-default",
+                          s.critical && "ring-kumo-link",
                           TONE_BAR[s.tone ?? "default"]
                         )}
                         style={{ left: `${left}%`, width: `${width}%` }}
