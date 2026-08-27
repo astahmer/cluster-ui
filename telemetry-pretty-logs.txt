@@ -1,0 +1,431 @@
+import { Cause, Context, Effect, Exit, Layer, Logger, Tracer } from 'effect';
+
+const isDev = process.env.NODE_ENV === 'development';
+const shouldLogEffectSpanAttributes = process.env.EFFECT_SPAN_LOG_ATTRIBUTES === 'true';
+const useDevColors =
+  process.env.FORCE_COLOR !== '0' &&
+  (isDev ||
+    process.env.FORCE_COLOR !== undefined ||
+    (process.env.NO_COLOR === undefined && process.stdout.isTTY === true));
+
+const devColors = {
+  reset: '\x1b[0m',
+  bold: '\x1b[1m',
+  dim: '\x1b[2m',
+  gray: '\x1b[90m',
+  brightWhite: '\x1b[97m',
+  blue: '\x1b[34m',
+  cyan: '\x1b[36m',
+  green: '\x1b[32m',
+  yellow: '\x1b[33m',
+  red: '\x1b[31m',
+  magenta: '\x1b[35m',
+} as const;
+
+const devSymbols = {
+  rootSpan: '◆',
+  span: '◇',
+  success: '✓',
+  failure: '✗',
+  running: '…',
+  event: '↳',
+  Trace: '·',
+  Debug: '◦',
+  Info: '●',
+  Warn: '▲',
+  Error: '■',
+  Fatal: '✖',
+  None: '·',
+  All: '·',
+} as const;
+
+const color = (value: string, ...colors: ReadonlyArray<string>) =>
+  useDevColors ? `${colors.join('')}${value}${devColors.reset}` : value;
+
+const makeEffectSpanLogPattern = () => {
+  const pattern = process.env.EFFECT_SPAN_LOG_PATTERN;
+  if (pattern === undefined) return /./;
+
+  try {
+    return new RegExp(pattern);
+  } catch {
+    return /./;
+  }
+};
+
+const effectSpanLogPattern = makeEffectSpanLogPattern();
+
+const matchesEffectSpanLogPattern = (name: string) => {
+  effectSpanLogPattern.lastIndex = 0;
+  return effectSpanLogPattern.test(name);
+};
+
+/**
+ * Logs errors via Effect's logging system before they propagate.
+ * Skips interruption-only causes because those are normal cancellation.
+ */
+export const withErrorLogging = <A, E, R>(self: Effect.Effect<A, E, R>) =>
+  self.pipe(
+    Effect.tapCause((cause) =>
+      Cause.hasInterruptsOnly(cause)
+        ? Effect.void
+        : Effect.logError(cause).pipe(Effect.annotateLogs({ 'error.unhandled': true })),
+    ),
+  );
+
+type StructuredLog = ReturnType<(typeof Logger.formatStructured)['log']>;
+
+interface DevLogEntry {
+  readonly _tag: 'Log';
+  readonly log: StructuredLog;
+}
+
+interface DevSpanEventEntry {
+  readonly _tag: 'Event';
+  readonly name: string;
+  readonly attributes: Readonly<Record<string, unknown>>;
+}
+
+interface DevSpanNode {
+  readonly _tag: 'Span';
+  readonly name: string;
+  readonly kind: Tracer.SpanKind;
+  readonly span: Tracer.Span;
+  readonly startTime: bigint;
+  readonly parent: DevSpanNode | undefined;
+  readonly entries: Array<DevTreeEntry>;
+  endTime: bigint | undefined;
+  exit: Exit.Exit<unknown, unknown> | undefined;
+}
+
+type DevTreeEntry = DevLogEntry | DevSpanEventEntry | DevSpanNode;
+
+interface DevTreeState {
+  readonly spans: WeakMap<object, DevSpanNode | undefined>;
+}
+
+const formatUnknown = (value: unknown): string => {
+  if (typeof value === 'string') return value;
+  if (value instanceof Error) return `${value.name}: ${value.message}`;
+
+  try {
+    const json = JSON.stringify(value);
+    return json === undefined ? String(value) : json;
+  } catch {
+    return String(value);
+  }
+};
+
+const formatDuration = (startTime: bigint, endTime: bigint | undefined) => {
+  if (endTime === undefined) return 'running';
+  const milliseconds = Number(endTime - startTime) / 1_000_000;
+  if (milliseconds < 10) return `${milliseconds.toFixed(1)}ms`;
+  return `${Math.round(milliseconds)}ms`;
+};
+
+const formatAttributes = (attributes: Readonly<Record<string, unknown>>) => {
+  const entries = Object.entries(attributes);
+  if (entries.length === 0) return '';
+  return ` ${color('{', devColors.dim)} ${entries
+    .map(
+      ([key, value]) =>
+        `${color(key, devColors.gray)}${color('=', devColors.dim)}${color(
+          formatUnknown(value),
+          devColors.yellow,
+        )}`,
+    )
+    .join(' ')} ${color('}', devColors.dim)}`;
+};
+
+const formatQualifiedSpanName = (name: string) => {
+  const separatorIndex = Math.max(name.lastIndexOf('.'), name.lastIndexOf('#'));
+  if (separatorIndex <= 0 || separatorIndex === name.length - 1) {
+    return color(name, devColors.bold, devColors.cyan);
+  }
+
+  return `${color(name.slice(0, separatorIndex), devColors.cyan)}${color(
+    name[separatorIndex] ?? '.',
+    devColors.dim,
+  )}${color(name.slice(separatorIndex + 1), devColors.bold, devColors.magenta)}`;
+};
+
+const formatSpanName = (name: string) => {
+  const httpSpan =
+    /^(?:(.+?)\s+)?(CONNECT|DELETE|GET|HEAD|OPTIONS|PATCH|POST|PUT|TRACE)(?:(\s+)(.+))?$/.exec(
+      name,
+    );
+  if (httpSpan === null) return formatQualifiedSpanName(name);
+
+  const prefix = httpSpan[1];
+  const spacing = httpSpan[3];
+  const suffix = httpSpan[4];
+  return `${prefix === undefined ? '' : `${formatQualifiedSpanName(prefix)} `}${color(
+    httpSpan[2] ?? '',
+    devColors.bold,
+    devColors.green,
+  )}${spacing === undefined ? '' : `${spacing}${color(suffix ?? '', devColors.brightWhite)}`}`;
+};
+
+const formatSpan = (node: DevSpanNode) => {
+  const status = node.exit === undefined ? 'RUNNING' : Exit.isSuccess(node.exit) ? 'OK' : 'ERROR';
+  const statusColor =
+    status === 'OK' ? devColors.green : status === 'ERROR' ? devColors.red : devColors.yellow;
+  const statusSymbol =
+    status === 'OK'
+      ? devSymbols.success
+      : status === 'ERROR'
+        ? devSymbols.failure
+        : devSymbols.running;
+  const spanSymbol = node.parent === undefined ? devSymbols.rootSpan : devSymbols.span;
+  const direction =
+    node.kind === 'server'
+      ? ` ${color('←', devColors.brightWhite, devColors.bold)}`
+      : node.kind === 'client'
+        ? ` ${color('→', devColors.brightWhite, devColors.bold)}`
+        : '';
+  const kind =
+    node.kind === 'internal' || node.kind === 'server' || node.kind === 'client'
+      ? ''
+      : ` ${color(`[${node.kind}]`, devColors.magenta, devColors.dim)}`;
+  const attributes = shouldLogEffectSpanAttributes
+    ? formatAttributes(Object.fromEntries(node.span.attributes))
+    : '';
+  const urlPath = node.span.attributes.get('url.path');
+  const name =
+    (node.kind === 'server' || node.kind === 'client') &&
+    typeof urlPath === 'string' &&
+    !node.name.includes(urlPath)
+      ? `${node.name} ${urlPath}`
+      : node.name;
+
+  return `${color(spanSymbol, devColors.cyan)}${direction} ${formatSpanName(name)}${kind}  ${color(
+    statusSymbol,
+    statusColor,
+    devColors.bold,
+  )}${
+    status === 'ERROR' ? ` ${color(status, statusColor, devColors.bold)}` : ''
+  } ${color(formatDuration(node.startTime, node.endTime), devColors.dim)}${attributes}`;
+};
+
+const logLevelColor = (level: StructuredLog['level']) => {
+  switch (level) {
+    case 'TRACE':
+      return devColors.gray;
+    case 'DEBUG':
+      return devColors.blue;
+    case 'INFO':
+      return devColors.green;
+    case 'WARN':
+      return devColors.yellow;
+    case 'ERROR':
+    case 'FATAL':
+      return devColors.red;
+    default:
+      return devColors.gray;
+  }
+};
+
+const logLevelSymbol = (level: StructuredLog['level']) => {
+  switch (level) {
+    case 'TRACE':
+      return devSymbols.Trace;
+    case 'DEBUG':
+      return devSymbols.Debug;
+    case 'INFO':
+      return devSymbols.Info;
+    case 'WARN':
+      return devSymbols.Warn;
+    case 'ERROR':
+      return devSymbols.Error;
+    case 'FATAL':
+      return devSymbols.Fatal;
+    case 'NONE':
+      return devSymbols.None;
+    default:
+      return devSymbols.All;
+  }
+};
+
+const formatLog = (entry: DevLogEntry) => {
+  const messages = Array.isArray(entry.log.message) ? entry.log.message : [entry.log.message];
+  const message = messages.map(formatUnknown).join(' ');
+  const annotations = formatAttributes({
+    ...entry.log.annotations,
+    ...Object.fromEntries(
+      Object.entries(entry.log.spans).map(([key, value]) => [key, `${value}ms`]),
+    ),
+  });
+  const cause = entry.log.cause === undefined ? '' : `\n${entry.log.cause}`;
+
+  return `${color(
+    `${logLevelSymbol(entry.log.level)} ${entry.log.level.padEnd(5)}`,
+    logLevelColor(entry.log.level),
+    devColors.bold,
+  )} ${color(message, devColors.bold)}${annotations}${cause}`;
+};
+
+const formatSpanEvent = (entry: DevSpanEventEntry) =>
+  `${color(`${devSymbols.event} EVENT`, devColors.magenta)} ${entry.name}${formatAttributes(entry.attributes)}`;
+
+const renderTreeEntry = (
+  entry: DevTreeEntry,
+  prefix: string,
+  isLast: boolean,
+  lines: Array<string>,
+) => {
+  const connector = isLast ? '└─ ' : '├─ ';
+  const value =
+    entry._tag === 'Span'
+      ? formatSpan(entry)
+      : entry._tag === 'Log'
+        ? formatLog(entry)
+        : formatSpanEvent(entry);
+  const valueLines = value.split('\n');
+  lines.push(`${prefix}${connector}${valueLines[0]}`);
+
+  const continuationPrefix = `${prefix}${isLast ? '   ' : '│  '}`;
+  for (let index = 1; index < valueLines.length; index++) {
+    lines.push(`${continuationPrefix}${valueLines[index]}`);
+  }
+
+  if (entry._tag !== 'Span') return;
+
+  for (const [index, child] of entry.entries.entries()) {
+    renderTreeEntry(child, continuationPrefix, index === entry.entries.length - 1, lines);
+  }
+};
+
+const renderTree = (root: DevSpanNode) => {
+  const lines = [formatSpan(root)];
+  for (const [index, entry] of root.entries.entries()) {
+    renderTreeEntry(entry, '', index === root.entries.length - 1, lines);
+  }
+  return `\n${lines.join('\n')}`;
+};
+
+const makeDevelopmentTracer = (delegate: Tracer.Tracer, state: DevTreeState): Tracer.Tracer =>
+  Tracer.make({
+    span(options) {
+      const span = delegate.span(options);
+      const parent =
+        options.parent._tag === 'Some' ? state.spans.get(options.parent.value) : undefined;
+      const node: DevSpanNode | undefined = matchesEffectSpanLogPattern(options.name)
+        ? {
+            _tag: 'Span',
+            name: options.name,
+            kind: options.kind,
+            span,
+            startTime: options.startTime,
+            parent,
+            entries: [],
+            endTime: undefined,
+            exit: undefined,
+          }
+        : parent;
+
+      const isVisibleSpan = node !== undefined && node.span === span;
+      if (isVisibleSpan) parent?.entries.push(node);
+
+      const wrappedSpan: Tracer.Span = {
+        get _tag() {
+          return span._tag;
+        },
+        get name() {
+          return span.name;
+        },
+        get spanId() {
+          return span.spanId;
+        },
+        get traceId() {
+          return span.traceId;
+        },
+        get parent() {
+          return span.parent;
+        },
+        get annotations() {
+          return span.annotations;
+        },
+        get status() {
+          return span.status;
+        },
+        get attributes() {
+          return span.attributes;
+        },
+        get links() {
+          return span.links;
+        },
+        get sampled() {
+          return span.sampled;
+        },
+        get kind() {
+          return span.kind;
+        },
+        end(endTime, exit) {
+          span.end(endTime, exit);
+          if (!isVisibleSpan || node.endTime !== undefined) return;
+
+          node.endTime = endTime;
+          node.exit = exit;
+          if (node.parent !== undefined) return;
+
+          const output = renderTree(node);
+          // oxlint-disable-next-line no-console
+          if (Exit.isSuccess(exit)) console.log(output);
+          // oxlint-disable-next-line no-console
+          else console.error(output);
+        },
+        attribute(key, value) {
+          span.attribute(key, value);
+        },
+        event(name, startTime, attributes = {}) {
+          span.event(name, startTime, attributes);
+          if (node !== undefined) node.entries.push({ _tag: 'Event', name, attributes });
+        },
+        addLinks(links) {
+          span.addLinks(links);
+        },
+      };
+
+      state.spans.set(wrappedSpan, node);
+      return wrappedSpan;
+    },
+    context: delegate.context,
+  });
+
+const fallbackPrettyLogger = Logger.consolePretty();
+
+const makeDevelopmentLogger = (state: DevTreeState) =>
+  Logger.make((options) => {
+    const span = options.fiber.currentSpan;
+    const node = span === undefined ? undefined : state.spans.get(span);
+    if (node === undefined) {
+      fallbackPrettyLogger.log(options);
+      return;
+    }
+
+    node.entries.push({ _tag: 'Log', log: Logger.formatStructured.log(options) });
+  });
+
+/**
+ * Development-only console integration that buffers one trace until its root span ends,
+ * then renders spans, events, and logs as a single ordered tree. Keeping the output atomic
+ * prevents concurrent HTTP requests from interleaving their branches in the terminal.
+ */
+export const DevelopmentConsoleLayer = Layer.effectContext(
+  Effect.gen(function* () {
+    const delegate = yield* Effect.tracer;
+    const currentLoggers = yield* Logger.CurrentLoggers;
+    const state: DevTreeState = { spans: new WeakMap() };
+    const loggers = new Set(
+      [...currentLoggers].filter(
+        (logger) => logger !== Logger.defaultLogger && logger !== Logger.tracerLogger,
+      ),
+    );
+    loggers.add(makeDevelopmentLogger(state));
+
+    return Context.empty().pipe(
+      Context.add(Tracer.Tracer, makeDevelopmentTracer(delegate, state)),
+      Context.add(Logger.CurrentLoggers, loggers),
+    );
+  }),
+);
