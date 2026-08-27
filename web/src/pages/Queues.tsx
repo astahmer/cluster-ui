@@ -4,7 +4,7 @@ import { api, type QueueInfo, type QueueJob, type QueueJobState } from "../api.t
 import { Badge, Table, TBody, TD, TH, THead, TR } from "../components/ui.tsx"
 import { ErrorNote, PageHeader, useCluster, useLive } from "../shell.tsx"
 import { Empty, Tooltip, Dialog, DialogTitle, DialogDescription } from "../kumo"
-import { JsonBlock, SkeletonTable } from "../components/pieces.tsx"
+import { JsonBlock, SkeletonTable, useHashParam } from "../components/pieces.tsx"
 import { Button, Input, Select } from "../components/ui.tsx"
 import { toast } from "../toast.tsx"
 import { confirmDialog } from "../components/dialogs.tsx"
@@ -20,7 +20,9 @@ export function QueuesPage() {
   const { loading, error, refresh } = useLive(async () => setQueues(await api.queues()))
   const [addFor, setAddFor] = React.useState<string | null>(null)
   const [cleanFor, setCleanFor] = React.useState<QueueInfo | null>(null)
-  const [browseQueue, setBrowseQueue] = React.useState<string | null>(null)
+  const [browseQueueParam, setBrowseQueueParam] = useHashParam("queue")
+  const browseQueue = browseQueueParam || null
+  const setBrowseQueue = (queue: string | null) => setBrowseQueueParam(queue ?? "")
   const config = useAppConfig()
   const cluster = useCluster()
   const readonly = config?.readonly === true || config?.role === "viewer"
@@ -100,7 +102,7 @@ export function QueuesPage() {
                   {q.counts?.failed ?? "—"}
                 </TD>
                 <TD className="text-right">
-                  <div className="flex justify-end gap-1.5">
+                  <div className="flex flex-wrap justify-end gap-1.5">
                     <Button
                       variant="secondary"
                       size="sm"
@@ -209,8 +211,12 @@ function QueueJobsPanel({
   readonly: boolean
   onClose: () => void
 }) {
-  const [state, setState] = React.useState<QueueJobState>("wait")
-  const [page, setPage] = React.useState(0)
+  const [stateParam, setStateParam] = useHashParam("queueState")
+  const state = JOB_STATES.some((entry) => entry.value === stateParam) ? stateParam as QueueJobState : "wait"
+  const setState = (next: QueueJobState) => setStateParam(next === "wait" ? "" : next)
+  const [pageParam, setPageParam] = useHashParam("queuePage")
+  const page = Math.max(0, Number.parseInt(pageParam || "0", 10) || 0)
+  const setPage = (next: number) => setPageParam(next <= 0 ? "" : String(next))
   const [jobs, setJobs] = React.useState<QueueJob[]>([])
   const [total, setTotal] = React.useState(0)
   const [selected, setSelected] = React.useState<QueueJob | null>(null)
@@ -282,15 +288,15 @@ function QueueJobsPanel({
       ) : (
         <div className="overflow-x-auto">
           <Table>
-            <THead><TR><TH>Job</TH><TH>Name</TH><TH>Status</TH><TH className="text-right">Attempts</TH><TH className="text-right">Actions</TH></TR></THead>
+            <THead><TR><TH>Job</TH><TH>Name</TH><TH>Status</TH><TH className="hidden text-right sm:table-cell">Attempts</TH><TH className="text-right">Actions</TH></TR></THead>
             <TBody>
               {jobs.map((job) => (
                 <TR key={job.id}>
                   <TD><button type="button" className="cursor-pointer font-mono text-[12px] text-kumo-link hover:underline" onClick={() => void inspect(job)}>{job.jobId}</button></TD>
                   <TD className="font-medium">{job.name}</TD>
                   <TD><Badge tone={job.state === "failed" ? "err" : job.state === "completed" ? "ok" : job.state === "active" ? "info" : "neutral"}>{job.state}</Badge></TD>
-                  <TD className="text-right tabular-nums">{job.attemptsMade}</TD>
-                  <TD className="text-right"><span className="flex justify-end gap-1">
+                  <TD className="hidden text-right tabular-nums sm:table-cell">{job.attemptsMade}</TD>
+                  <TD className="text-right"><span className="flex flex-wrap justify-end gap-1">
                     <Button variant="ghost" size="sm" onClick={() => void inspect(job)}>inspect</Button>
                     {job.state === "delayed" && <Button variant="secondary" size="sm" disabled={readonly || busyId === job.id} onClick={() => void promote(job)}>{busyId === job.id ? "promoting…" : "promote"}</Button>}
                   </span></TD>
@@ -301,9 +307,9 @@ function QueueJobsPanel({
         </div>
       )}
       <div className="flex items-center justify-between border-t border-kumo-line px-3 py-2 text-[12px]">
-        <Button variant="ghost" size="sm" disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>previous</Button>
+        <Button variant="ghost" size="sm" disabled={page === 0} onClick={() => setPage(Math.max(0, page - 1))}>previous</Button>
         <span className="tabular-nums text-kumo-subtle">page {page + 1} / {pages}</span>
-        <Button variant="ghost" size="sm" disabled={page + 1 >= pages} onClick={() => setPage((p) => p + 1)}>next</Button>
+        <Button variant="ghost" size="sm" disabled={page + 1 >= pages} onClick={() => setPage(page + 1)}>next</Button>
       </div>
       {selected && detail && (
         <Dialog.Root open onOpenChange={(open: boolean) => !open && (setSelected(null), setDetail(null))}>

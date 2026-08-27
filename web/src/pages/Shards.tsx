@@ -33,7 +33,10 @@ export function ShardsPage() {
   const filter = (filterParam === "assigned" || filterParam === "unassigned" ? filterParam : "all") as ShardFilter
   const setFilter = (v: string) => setFilterParam(v === "all" ? "" : v)
   const { loading, error, refresh } = usePolling(async () => setShards(await api.shards()))
-  const sort = useSort<Shard>()
+  const sort = useSort<Shard>(null, {
+    urlKey: "sort",
+    allowedKeys: ["shardId", "address"]
+  })
 
   const facetDefs: FacetDef<Shard>[] = [
     {

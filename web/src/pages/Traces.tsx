@@ -1,10 +1,10 @@
 import * as React from "react"
 import { Copy, MagnifyingGlass, Stack, WarningCircle } from "@phosphor-icons/react"
 import { api, type Message, type TraceSummary } from "../api.ts"
-import { Badge, Button, Input, Table, TBody, TD, TH, THead, TR } from "../components/ui.tsx"
-import { DetailPanel, SkeletonTable, StatusBadge, rowInteractions, Pager } from "../components/pieces.tsx"
+import { Badge, Button, Input, Select, Table, TBody, TD, TH, THead, TR } from "../components/ui.tsx"
+import { DetailPanel, Pager, SkeletonTable, StatusBadge, rowInteractions, useHashParam } from "../components/pieces.tsx"
 import { SpanWaterfall, type TimelineSpan } from "../components/timeline.tsx"
-import { ErrorNote, PageHeader, useCluster, useEscToClose, useLive } from "../shell.tsx"
+import { Breadcrumbs, ErrorNote, PageHeader, useCluster, useEscToClose, useLive } from "../shell.tsx"
 import { Empty } from "../kumo"
 import { fmtTime } from "../format.ts"
 import { useExport } from "../export.ts"
@@ -25,11 +25,13 @@ export function TracesPage({
   const [rows, setRows] = React.useState<TraceSummary[] | null>(null)
   const [total, setTotal] = React.useState(0)
   // P1-15: trace-id substring search + offset paging
-  const [search, setSearch] = React.useState("")
+  const [search, setSearch] = useHashParam("q")
   const [debouncedSearch, setDebouncedSearch] = React.useState("")
-  const [page, setPage] = React.useState(1)
-  const [createdAfter, setCreatedAfter] = React.useState(initialFilters?.createdAfter ?? "")
-  const [createdBefore, setCreatedBefore] = React.useState(initialFilters?.createdBefore ?? "")
+  const [pageParam, setPageParam] = useHashParam("page")
+  const page = Math.max(1, Number.parseInt(pageParam || "1", 10) || 1)
+  const setPage = (next: number) => setPageParam(next <= 1 ? "" : String(next))
+  const [createdAfter, setCreatedAfter] = useHashParam("createdAfter")
+  const [createdBefore, setCreatedBefore] = useHashParam("createdBefore")
   const pageSize = 50
   const [openTraceId, setOpenTraceId] = React.useState<string | null>(null)
 
@@ -122,12 +124,12 @@ export function TracesPage({
               <TH>Trace ID</TH>
               <TH className="text-right">Spans</TH>
               <TH>Status</TH>
-              <TH>Services</TH>
-              <TH>First span</TH>
-              <TH>Last span</TH>
+              <TH className="hidden sm:table-cell">Services</TH>
+              <TH className="hidden md:table-cell">First span</TH>
+              <TH className="hidden md:table-cell">Last span</TH>
               {/* this column is the first→last creation window, NOT critical-path
                   duration — say so where people read it (UX audit #2) */}
-              <TH className="text-right" title="time from first to last span creation — individual span durations live in the waterfall">
+              <TH className="hidden text-right md:table-cell" title="time from first to last span creation — individual span durations live in the waterfall">
                 Duration
               </TH>
             </TR>
@@ -141,7 +143,7 @@ export function TracesPage({
                   className="cursor-pointer hover:bg-kumo-recessed/60"
                   {...rowInteractions(() => setOpenTraceId(t.traceId))}
                 >
-                  <TD>
+                  <TD className="max-w-[12rem]">
                     <a
                       href={`#/traces/${encodeURIComponent(t.traceId)}`}
                       onClick={(e) => e.stopPropagation()}
@@ -155,7 +157,7 @@ export function TracesPage({
                   <TD>
                     {t.failedCount > 0 ? <Badge tone="err">{t.failedCount} failed</Badge> : <Badge tone="ok">healthy</Badge>}
                   </TD>
-                  <TD>
+                  <TD className="hidden sm:table-cell">
                     <div className="flex flex-wrap gap-1">
                       {(t.services.length > 0 ? t.services.slice(0, 2) : ["—"]).map((k) => (
                         <Badge key={k} tone="info">
@@ -165,9 +167,9 @@ export function TracesPage({
                       {t.services.length > 2 && <span className="text-[11px] text-kumo-subtle">+{t.services.length - 2} more</span>}
                     </div>
                   </TD>
-                  <TD className="text-kumo-subtle">{fmtTime(t.firstAt)}</TD>
-                  <TD className="text-kumo-subtle">{fmtTime(t.lastAt)}</TD>
-                  <TD className="text-right tabular-nums">
+                  <TD className="hidden text-kumo-subtle md:table-cell">{fmtTime(t.firstAt)}</TD>
+                  <TD className="hidden text-kumo-subtle md:table-cell">{fmtTime(t.lastAt)}</TD>
+                  <TD className="hidden text-right tabular-nums md:table-cell">
                     <span
                       title="first → last span creation window — see the waterfall for real span durations"
                     >
@@ -222,13 +224,11 @@ export function TracesPage({
 export function TraceDetailPage({ traceId }: { traceId: string }) {
   return (
     <div>
+      <Breadcrumbs items={[{ label: "Traces", href: "#/traces" }, { label: shortId(traceId) }]} />
       <PageHeader title={`Trace ${shortId(traceId)}`} subtitle="execution timeline — oldest first">
         <button type="button" className="inline-flex items-center gap-1 text-[12px] text-kumo-subtle hover:text-kumo-default" onClick={() => copyText(traceId)}>
           <Copy className="h-3 w-3" /> copy trace id
         </button>
-        <a href="#/traces" className="text-[13px] text-kumo-subtle hover:text-kumo-default">
-          ← all traces
-        </a>
       </PageHeader>
       <TraceDetailBody traceId={traceId} />
     </div>
@@ -247,6 +247,8 @@ function TraceDetailBody({ traceId, compact }: { traceId: string; compact?: bool
   const cluster = useCluster()
   const [spanSearch, setSpanSearch] = React.useState("")
   const [focus, setFocus] = React.useState<"all" | "failed" | "slow">("all")
+  const [groupBy, setGroupBy] = React.useState<"entity" | "kind" | "status">("entity")
+  const [zoom, setZoom] = React.useState(1)
   const [selectedKey, setSelectedKey] = React.useState<string | null>(null)
   const { refresh } = useLive(async () => {
     try {
@@ -306,7 +308,7 @@ function TraceDetailBody({ traceId, compact }: { traceId: string; compact?: bool
     }
   }, [traceId, cluster])
 
-  const spans = toSpans(rows ?? [])
+  const spans = toSpans(rows ?? [], groupBy)
   const filteredSpans = React.useMemo(() => {
     const query = spanSearch.trim().toLowerCase()
     return spans.filter((span) => {
@@ -373,6 +375,40 @@ function TraceDetailBody({ traceId, compact }: { traceId: string; compact?: bool
                 </Button>
               ))}
             </div>
+            <label className="flex items-center gap-1.5 text-[11px] text-kumo-subtle">
+              group by
+              <Select
+                aria-label="group spans by"
+                className="h-8"
+                value={groupBy}
+                onChange={(event) => setGroupBy(event.target.value as typeof groupBy)}
+              >
+                <option value="entity">entity type</option>
+                <option value="kind">message kind</option>
+                <option value="status">status</option>
+              </Select>
+            </label>
+            <div className="flex items-center gap-1" role="group" aria-label="timeline zoom">
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-label="Zoom out timeline"
+                disabled={zoom <= 1}
+                onClick={() => setZoom((value) => Math.max(1, value - 0.5))}
+              >
+                −
+              </Button>
+              <span className="min-w-10 text-center text-[11px] tabular-nums text-kumo-subtle">{Math.round(zoom * 100)}%</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-label="Zoom in timeline"
+                disabled={zoom >= 3}
+                onClick={() => setZoom((value) => Math.min(3, value + 0.5))}
+              >
+                +
+              </Button>
+            </div>
             <span className="ml-auto text-[11px] tabular-nums text-kumo-subtle">
               showing {filteredSpans.length}/{spans.length}
             </span>
@@ -383,14 +419,14 @@ function TraceDetailBody({ traceId, compact }: { traceId: string; compact?: bool
             <span className="inline-flex items-center gap-1"><i className="h-2 w-2 rounded-full bg-kumo-brand/70" /> active/unknown</span>
             <span className="ml-auto">click any row for details</span>
           </div>
-          <SpanWaterfall spans={filteredSpans} selectedKey={selectedKey} onSelect={(span) => setSelectedKey(span.key)} />
+          <SpanWaterfall spans={filteredSpans} zoom={zoom} selectedKey={selectedKey} onSelect={(span) => setSelectedKey(span.key)} />
           {filteredSpans.length === 0 && (
             <div className="rounded-md border border-dashed border-kumo-line px-3 py-5 text-center text-[12px] text-kumo-subtle">
               No spans match this focus. <button type="button" className="underline" onClick={() => { setFocus("all"); setSpanSearch("") }}>clear filters</button>
             </div>
           )}
           {selectedSpan && (
-            <SpanInspector span={selectedSpan} onClose={() => setSelectedKey(null)} />
+            <SpanInspector traceId={traceId} span={selectedSpan} onClose={() => setSelectedKey(null)} />
           )}
         </div>
       )}
@@ -415,7 +451,7 @@ function TraceDetailBody({ traceId, compact }: { traceId: string; compact?: bool
                     {m.failed && <Badge tone="err" className="ml-1">failed</Badge>}
                   </TD>
                   <TD className="font-medium">
-                    <a href={`#/messages/${encodeURIComponent(m.id)}`} className="hover:text-kumo-link hover:underline">
+                    <a href={traceMessageHref(traceId, m.id)} className="hover:text-kumo-link hover:underline">
                       {m.entityType}/{m.entityId}
                     </a>
                   </TD>
@@ -437,7 +473,7 @@ function TraceDetailBody({ traceId, compact }: { traceId: string; compact?: bool
   )
 }
 
-function toSpans(rows: ReadonlyArray<Message>): TimelineSpan[] {
+function toSpans(rows: ReadonlyArray<Message>, groupBy: "entity" | "kind" | "status" = "entity"): TimelineSpan[] {
   const sorted = [...rows].sort((a, b) => a.createdAt - b.createdAt)
   const rowsById = new Map(sorted.map((row) => [row.id, row]))
   const depthById = new Map<string, number>()
@@ -469,6 +505,10 @@ function toSpans(rows: ReadonlyArray<Message>): TimelineSpan[] {
       durMs !== null ? m.createdAt + durMs : next ? Math.max(next.createdAt, m.createdAt + 1) : m.createdAt + Math.max(totalHint(sorted), 250)
     const label = m.tag || m.entityType
     const entityLabel = m.entityId.length > 18 ? `${m.entityId.slice(0, 8)}…${m.entityId.slice(-6)}` : m.entityId
+    const group =
+      groupBy === "kind" ? m.kind :
+      groupBy === "status" ? (m.failed ? "failed" : m.status) :
+      m.entityType
     return {
       key: m.id,
       label: (
@@ -478,7 +518,7 @@ function toSpans(rows: ReadonlyArray<Message>): TimelineSpan[] {
           {m.entityId && <span className="text-[10px] text-kumo-subtle"> · {entityLabel}</span>}
         </>
       ),
-      group: m.entityType,
+      group,
       startMs: m.createdAt,
       endMs,
       tone: m.failed ? "danger" : m.status === "done" ? "success" : "default",
@@ -492,7 +532,7 @@ function toSpans(rows: ReadonlyArray<Message>): TimelineSpan[] {
   })
 }
 
-function SpanInspector({ span, onClose }: { span: TimelineSpan; onClose: () => void }) {
+function SpanInspector({ traceId, span, onClose }: { traceId: string; span: TimelineSpan; onClose: () => void }) {
   const duration = Math.max(0, span.endMs - span.startMs)
   return (
     <section className="mt-3 rounded-md border border-kumo-brand/40 bg-kumo-canvas p-3" aria-label="selected span details">
@@ -510,7 +550,7 @@ function SpanInspector({ span, onClose }: { span: TimelineSpan; onClose: () => v
         <div><dt className="text-kumo-subtle">Timing</dt><dd className="mt-0.5">{span.durationSource === "recorded" ? "recorded" : "inferred"}</dd></div>
       </dl>
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <a href={`#/messages/${encodeURIComponent(span.key)}`} className="text-xs text-kumo-link underline-offset-2 hover:underline">open message detail ↗</a>
+        <a href={traceMessageHref(traceId, span.key)} className="text-xs text-kumo-link underline-offset-2 hover:underline">open message detail ↗</a>
         <button type="button" className="inline-flex items-center gap-1 text-xs text-kumo-subtle hover:text-kumo-default" onClick={() => copyText(span.key)}><Copy className="h-3 w-3" /> copy message id</button>
       </div>
     </section>
@@ -519,6 +559,14 @@ function SpanInspector({ span, onClose }: { span: TimelineSpan; onClose: () => v
 
 function copyText(value: string) {
   navigator.clipboard?.writeText(value).catch(() => {})
+}
+
+function traceMessageHref(traceId: string, messageId: string): string {
+  const params = new URLSearchParams({
+    returnTo: "/traces/" + encodeURIComponent(traceId),
+    returnLabel: "back to trace"
+  })
+  return "#/messages/" + encodeURIComponent(messageId) + "?" + params.toString()
 }
 
 function totalHint(sorted: ReadonlyArray<Message>): number {

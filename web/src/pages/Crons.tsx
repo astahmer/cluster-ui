@@ -25,13 +25,25 @@ function statusToneFor(status: CronJob["lastStatus"]) {
   }
 }
 
+function messageHref(entityType: string): string {
+  const params = new URLSearchParams({
+    entityType,
+    returnTo: "/crons",
+    returnLabel: "back to crons"
+  })
+  return "#/messages?" + params.toString()
+}
+
 export function CronsPage() {
   const [rows, setRows] = React.useState<CronJob[]>([])
   const [overdueOnlyParam, setOverdueOnly] = useHashParam("overdue")
   const overdueOnly = overdueOnlyParam === "1"
   const setOverdueOnlyParam = (v: boolean) => setOverdueOnly(v ? "1" : "")
   const { loading, error, refresh } = usePolling(async () => setRows(await api.crons()))
-  const sort = useSort<CronJob>()
+  const sort = useSort<CronJob>(null, {
+    urlKey: "sort",
+    allowedKeys: ["name", "lastRunAt", "nextRunAt"]
+  })
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const facetDefs: FacetDef<CronJob>[] = [
@@ -117,7 +129,7 @@ export function CronsPage() {
             <THead>
               <TR>
                 <SortableTh label="Name" sortKey="name" sort={sort} />
-                <SortableTh label="Last run" sortKey="lastRunAt" sort={sort} />
+                <SortableTh label="Last run" sortKey="lastRunAt" sort={sort} className="hidden sm:table-cell" />
                 <SortableTh label="Next run" sortKey="nextRunAt" sort={sort} />
                 <TH className={STICKY_TH}>Last status</TH>
               </TR>
@@ -126,11 +138,11 @@ export function CronsPage() {
               {sort.sorted(visible).map((c) => (
                 <TR key={c.entityType} className={overdue(c) ? "bg-kumo-danger-tint/50" : undefined}>
                   <TD className="font-medium">
-                    <a href={`#/messages?entityType=${encodeURIComponent(c.entityType)}`} className="hover:text-kumo-link hover:underline">
+                    <a href={messageHref(c.entityType)} className="hover:text-kumo-link hover:underline">
                       {c.name}
                     </a>
                   </TD>
-                  <TD className="whitespace-nowrap text-kumo-subtle" title={fmtTime(c.lastRunAt)}>
+                  <TD className="hidden whitespace-nowrap text-kumo-subtle sm:table-cell" title={fmtTime(c.lastRunAt)}>
                     {relTime(c.lastRunAt)}
                   </TD>
                   <TD className="whitespace-nowrap tabular-nums">

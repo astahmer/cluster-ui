@@ -11,7 +11,10 @@ import { FilterBar, presenceFacet, useFacets, type FacetDef } from "../component
 export function RunnersPage() {
   const [rows, setRows] = React.useState<Runner[]>([])
   const { loading, error, refresh } = useLive(async () => setRows(await api.runners()))
-  const sort = useSort<Runner>()
+  const sort = useSort<Runner>(null, {
+    urlKey: "sort",
+    allowedKeys: ["address", "version", "shards"]
+  })
 
   const facetDefs: FacetDef<Runner>[] = [
     {

@@ -1,5 +1,5 @@
 import * as React from "react"
-import { SquaresFour, Cpu, GridFour, Cube, ClockCounterClockwise, FlowArrow, ListDashes, CirclesThree, List, Stack, Sparkle, Plugs, MagnifyingGlass, QueueIcon, Moon, Sun, Wrench, BookmarkSimple } from "@phosphor-icons/react"
+import { SquaresFour, Cpu, GridFour, Cube, ClockCounterClockwise, FlowArrow, ListDashes, CirclesThree, List, Stack, Sparkle, Plugs, MagnifyingGlass, QueueIcon, Moon, Sun, Wrench, BookmarkSimple, CaretRight } from "@phosphor-icons/react"
 import { api, getCluster, onClusterChange, setCluster } from "./api.ts"
 import { useAppConfig } from "./config.ts"
 import { toast } from "./toast.tsx"
@@ -753,6 +753,32 @@ function NavGroup({
 }
 
 /* ------------------------------ page helpers ------------------------------ */
+
+export interface BreadcrumbItem {
+  label: string
+  href?: string
+}
+
+export function Breadcrumbs({ items }: { items: ReadonlyArray<BreadcrumbItem> }) {
+  return (
+    <nav aria-label="Breadcrumb" className="mb-2 flex min-w-0 items-center gap-1 text-[11px] text-kumo-subtle">
+      {items.map((item, index) => (
+        <React.Fragment key={item.label + index}>
+          {index > 0 && <CaretRight aria-hidden className="h-3 w-3 shrink-0 text-kumo-inactive" />}
+          {item.href ? (
+            <a href={item.href} className="min-w-0 max-w-[18rem] truncate hover:text-kumo-link hover:underline">
+              {item.label}
+            </a>
+          ) : (
+            <span className="min-w-0 max-w-[18rem] truncate font-medium text-kumo-default" aria-current="page">
+              {item.label}
+            </span>
+          )}
+        </React.Fragment>
+      ))}
+    </nav>
+  )
+}
 
 export function PageHeader({
   title,

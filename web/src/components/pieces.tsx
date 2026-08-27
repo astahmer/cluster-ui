@@ -1,6 +1,6 @@
 import * as React from "react"
 import { SkeletonLine } from "../kumo"
-import { CaretDown, CaretRight, X } from "@phosphor-icons/react"
+import { ArrowsIn, ArrowsOut, CaretDown, CaretRight, X } from "@phosphor-icons/react"
 import { TH } from "./ui.tsx"
 import { api, type MessageDetail, type MessageStatus } from "../api.ts"
 import { relTime } from "../format.ts"
@@ -126,6 +126,29 @@ export function DetailPanel({
 }) {
   const panelRef = useDialogA11y(open)
   const titleId = React.useId()
+  const [width, setWidth] = React.useState(560)
+  const [fullscreen, setFullscreen] = React.useState(false)
+  const resizing = React.useRef(false)
+
+  const startResize = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (fullscreen) return
+    event.currentTarget.setPointerCapture(event.pointerId)
+    resizing.current = true
+    const startX = event.clientX
+    const startWidth = width
+    const onMove = (moveEvent: PointerEvent) => {
+      if (!resizing.current) return
+      setWidth(Math.min(Math.max(startWidth + startX - moveEvent.clientX, 360), Math.min(window.innerWidth, 960)))
+    }
+    const stop = () => {
+      resizing.current = false
+      window.removeEventListener("pointermove", onMove)
+      window.removeEventListener("pointerup", stop)
+    }
+    window.addEventListener("pointermove", onMove)
+    window.addEventListener("pointerup", stop)
+  }
+
   if (!open) return null
   return (
     <div className="fixed inset-0 z-40 flex justify-end bg-black/40" onClick={onClose}>
@@ -135,14 +158,43 @@ export function DetailPanel({
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="flex h-full min-w-0 w-full max-w-xl flex-col overflow-x-hidden overflow-y-auto overscroll-contain border-l border-kumo-line bg-kumo-base p-4 shadow-xl focus:outline-none"
+        className={cn(
+          "relative flex h-full min-w-0 w-full flex-col overflow-x-hidden overflow-y-auto overscroll-contain border-l border-kumo-line bg-kumo-base p-4 shadow-xl focus:outline-none",
+          fullscreen && "max-w-none"
+        )}
+        style={{ width: fullscreen ? "100%" : String(width) + "px", maxWidth: "100vw" }}
         onClick={(e) => e.stopPropagation()}
       >
+        {!fullscreen && (
+          <div
+            role="separator"
+            aria-label="Resize detail panel"
+            aria-orientation="vertical"
+            tabIndex={0}
+            className="absolute inset-y-0 left-0 z-10 hidden w-1 cursor-ew-resize bg-transparent transition-colors hover:bg-kumo-brand/50 focus-visible:bg-kumo-brand sm:block"
+            onPointerDown={startResize}
+            onKeyDown={(event) => {
+              if (event.key === "ArrowLeft") setWidth((value) => Math.min(value + 32, Math.min(window.innerWidth, 960)))
+              if (event.key === "ArrowRight") setWidth((value) => Math.max(value - 32, 360))
+            }}
+          />
+        )}
         <div className="mb-3 flex min-w-0 shrink-0 items-center justify-between gap-2">
           <h2 id={titleId} className="min-w-0 flex-1 overflow-hidden text-sm font-semibold">{title}</h2>
-          <Button variant="ghost" size="sm" className="shrink-0" onClick={onClose}>
-            <X className="h-3.5 w-3.5" /> close
-          </Button>
+          <div className="flex shrink-0 items-center gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-label={fullscreen ? "Exit fullscreen detail panel" : "Open detail panel fullscreen"}
+              title={fullscreen ? "exit fullscreen" : "fullscreen"}
+              onClick={() => setFullscreen((value) => !value)}
+            >
+              {fullscreen ? <ArrowsIn className="h-3.5 w-3.5" /> : <ArrowsOut className="h-3.5 w-3.5" />}
+            </Button>
+            <Button variant="ghost" size="sm" className="shrink-0" onClick={onClose}>
+              <X className="h-3.5 w-3.5" /> close
+            </Button>
+          </div>
         </div>
         {children}
       </div>
@@ -241,12 +293,26 @@ export interface SortState {
  * Usage: `const sort = useSort<Row>()` ... `<SortableTh label="X" sortKey="x" sort={sort} />`
  * ... `sort.sorted(rows)` wherever rows are rendered.
  */
-export function useSort<T>(initial: SortState | null = null) {
-  const [sort, setSort] = React.useState<SortState | null>(initial)
+export function useSort<T>(
+  initial: SortState | null = null,
+  options?: { urlKey?: string; allowedKeys?: ReadonlyArray<string> }
+) {
+  const [localSort, setLocalSort] = React.useState<SortState | null>(initial)
+  const [urlSortValue, setUrlSortValue] = useHashParam(options?.urlKey ?? "__cluster_ui_local_sort")
+  const urlSort = React.useMemo(() => {
+    if (!options?.urlKey || !urlSortValue) return null
+    const [key, dir] = urlSortValue.split(":")
+    if (!key || (dir !== "asc" && dir !== "desc")) return null
+    if (options.allowedKeys && !options.allowedKeys.includes(key)) return null
+    return { key, dir } as SortState
+  }, [options?.allowedKeys, options?.urlKey, urlSortValue])
+  const sort = options?.urlKey ? (urlSort ?? localSort) : localSort
 
   const toggle = React.useCallback((key: string) => {
-    setSort((s) => (s !== null && s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" }))
-  }, [])
+    const next: SortState = sort !== null && sort.key === key ? { key, dir: sort.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" }
+    if (options?.urlKey) setUrlSortValue(next.key + ":" + next.dir)
+    else setLocalSort(next)
+  }, [options?.urlKey, setUrlSortValue, sort])
 
   const sorted = React.useCallback(
     (rows: ReadonlyArray<T>): T[] => {

@@ -10,7 +10,7 @@ import {
 import { ArrowClockwise, ArrowCounterClockwise, ArrowUpRight, Copy, FunnelSimple, Trash, XCircle } from "@phosphor-icons/react"
 import { useAppConfig } from "../config.ts"
 import { downloadCsv, downloadJson } from "../export.ts"
-import { DetailPanel, SkeletonTable, StatusBadge, statusTone, rowInteractions, useMessageDetail, Pager } from "../components/pieces.tsx"
+import { DetailPanel, Pager, SkeletonTable, StatusBadge, statusTone, rowInteractions, useHashParam, useMessageDetail } from "../components/pieces.tsx"
 import { FilterBar, useFacets, type FacetDef } from "../components/filters/index.tsx"
 import { FlowGraph, jobTreeToSpecs } from "../components/flow-graph.tsx"
 import { confirmDialog } from "../components/dialogs.tsx"
@@ -18,7 +18,7 @@ import { toast } from "../toast.tsx"
 import { Badge, Button, Input, Select, Table, TBody, TD, TH, THead, TR, cn } from "../components/ui.tsx"
 import { Table as KumoTable } from "../kumo"
 import { fmtCountdown, fmtTime, relTime } from "../format.ts"
-import { ErrorNote, PageHeader, useEscToClose } from "../shell.tsx"
+import { Breadcrumbs, ErrorNote, PageHeader, useEscToClose } from "../shell.tsx"
 import { triggerRefresh, useLive } from "../live.ts"
 import { Banner, CodeBlock, Empty, InputGroup, Tabs, Toolbar } from "../kumo"
 
@@ -56,6 +56,9 @@ export interface MessagesInitialFilters {
   q?: string
   createdAfter?: string
   createdBefore?: string
+  page?: string
+  pageSize?: string
+  sort?: string
 }
 
 function replaceMessageSearch(values: {
@@ -115,9 +118,16 @@ export function MessagesPage({
 
   // P2-19: number of collapsed filters currently active (drives the badge)
   const activeFilterCount = [entityType, entityId, createdAfter, createdBefore].filter((v) => v !== "").length
-  const [pageSize, setPageSize] = React.useState(50)
-  const [sort, setSort] = React.useState<"id" | "deliverAt">("id")
-  const [page, setPage] = React.useState(1)
+  const [pageParam, setPageParam] = useHashParam("page")
+  const page = Math.max(1, Number.parseInt(pageParam || "1", 10) || 1)
+  const setPage = (next: number) => setPageParam(next <= 1 ? "" : String(next))
+  const [pageSizeParam, setPageSizeParam] = useHashParam("pageSize")
+  const pageSizeValue = Number.parseInt(pageSizeParam || "50", 10)
+  const pageSize = [25, 50, 100, 200].includes(pageSizeValue) ? pageSizeValue : 50
+  const setPageSize = (next: number) => setPageSizeParam(next === 50 ? "" : String(next))
+  const [sortParam, setSortParam] = useHashParam("sort")
+  const sort: "id" | "deliverAt" = sortParam === "deliverAt" ? "deliverAt" : "id"
+  const setSort = (next: "id" | "deliverAt") => setSortParam(next === "id" ? "" : next)
   const [openId, setOpenIdState] = React.useState<string | null>(messageId ?? null)
   const [actionError, setActionError] = React.useState<string | null>(null)
 
@@ -321,6 +331,7 @@ export function MessagesPage({
 
   return (
     <div>
+      {openId === null && <Breadcrumbs items={[{ label: "Messages" }]} />}
       <PageHeader title="Messages" subtitle={data ? `${data.total.toLocaleString()} matching messages` : undefined} />
 
       {/* status tabs */}
@@ -499,7 +510,7 @@ export function MessagesPage({
                   title="toggle server-side sort"
                   className="cursor-pointer"
                   onClick={() => {
-                    setSort((prev) => (prev === "id" ? "deliverAt" : "id"))
+                    setSort(sort === "id" ? "deliverAt" : "id")
                     setPage(1)
                   }}
                 >
@@ -584,7 +595,6 @@ function MessageRow({
     config?.tracingUrlTemplate && m.traceId ?
       config.tracingUrlTemplate.replace("{traceId}", encodeURIComponent(m.traceId)) :
       null
-
   return (
     <TR
       className="cursor-pointer"
@@ -701,6 +711,65 @@ function OutcomeBanner({ result }: { result: RunResult }) {
   )
 }
 
+function FailureRemediation({
+  detail,
+  canRetry,
+  readonly,
+  onRetry
+}: {
+  detail: MessageDetail
+  canRetry: boolean
+  readonly: boolean
+  onRetry: () => void
+}) {
+  const reason = failureText(detail.result?.exit)
+  const notRegistered = reason?.toLowerCase().includes("not registered") === true
+  return (
+    <section className="rounded-md border border-kumo-danger/30 bg-kumo-danger-tint/60 p-3" data-testid="failure-remediation">
+      <div className="font-medium text-kumo-danger">What to do next</div>
+      <p className="mt-1 text-[12px] text-kumo-danger/90">
+        {notRegistered
+          ? "The target entity is not registered on this cluster. Check the deployed runner layers and entity type before retrying."
+          : "Inspect the exit details below, then retry when the underlying problem is fixed."}
+      </p>
+      {reason && (
+        <details className="mt-2 text-[11px] text-kumo-danger/90">
+          <summary className="cursor-pointer font-medium">show failure reason</summary>
+          <p className="mt-1 break-words">{reason}</p>
+        </details>
+      )}
+      {canRetry && (
+        <Button
+          variant="secondary"
+          size="sm"
+          className="mt-3"
+          disabled={readonly}
+          title={readonly ? "read-only mode" : "re-deliver this message after fixing the cause"}
+          onClick={onRetry}
+        >
+          retry message
+        </Button>
+      )}
+    </section>
+  )
+}
+
+function failureText(value: unknown, depth = 0): string | null {
+  if (depth > 4 || value === null || value === undefined) return null
+  if (typeof value === "string") return value.length > 500 ? value.slice(0, 500) + "…" : value
+  if (typeof value !== "object") return null
+  const entries = Object.entries(value)
+  for (const key of ["message", "reason", "failureReason", "error"]) {
+    const candidate = entries.find(([entryKey, entryValue]) => entryKey === key && typeof entryValue === "string")?.[1]
+    if (typeof candidate === "string") return failureText(candidate, depth + 1)
+  }
+  for (const [, nested] of entries) {
+    const found = failureText(nested, depth + 1)
+    if (found) return found
+  }
+  return null
+}
+
 /** JSON viewer built on kumo CodeBlock with a compact truncation mode. */
 function PayloadView({ value, max = 400 }: { value: unknown; max?: number }) {
   const [open, setOpen] = React.useState(false)
@@ -763,6 +832,10 @@ function MessageDetailBody({
   const canInterrupt = m.status === "pending" || m.status === "inflight" || m.status === "scheduled"
   // reset-activity re-arms a workflow activity (processed=0, last_read=NULL)
   const canResetActivity = m.entityType.startsWith("Workflow/")
+  const hasFailure = m.failed === true || d.result?.outcome === "Failure"
+  const entityHref = m.entityType.startsWith("Workflow/")
+    ? "#/workflows/" + encodeURIComponent(m.entityType.slice("Workflow/".length)) + "/" + encodeURIComponent(m.entityId)
+    : "#/entities/" + encodeURIComponent(m.entityType)
   const traceUrl =
     config?.tracingUrlTemplate && m.traceId ?
       config.tracingUrlTemplate.replace("{traceId}", encodeURIComponent(m.traceId)) :
@@ -799,6 +872,15 @@ function MessageDetailBody({
         />
       )}
 
+      {hasFailure && (
+        <FailureRemediation
+          detail={d}
+          canRetry={canRetry}
+          readonly={readonly}
+          onRetry={() => void act(() => api.retryMessage(m.id), "retry")}
+        />
+      )}
+
       {clusterKind === "redis" && <JobFlowSection messageId={m.id} />}
 
       <section className="grid min-w-0 grid-cols-1 gap-x-4 gap-y-2 rounded-lg border border-kumo-line bg-kumo-canvas/50 p-3 sm:grid-cols-2">
@@ -817,7 +899,10 @@ function MessageDetailBody({
         <Field label="Created">{fmtTime(m.createdAt)}</Field>
         <Field label="Machine id">{m.machineId}</Field>
         <Field label="Entity">
-          {m.entityType}/{m.entityId}
+          <a href={entityHref} className="text-kumo-link hover:underline">
+            {m.entityType}
+          </a>
+          <span>/{m.entityId}</span>
         </Field>
         <Field label="Shard">{m.shardId}</Field>
         <Field label="Last read">{fmtLastRead(m.lastRead)}</Field>
@@ -846,8 +931,8 @@ function MessageDetailBody({
       </section>
 
       {(canRetry || canInterrupt || canResetActivity) && (
-        <section className="flex min-w-0 flex-wrap items-center gap-2">
-          {canRetry && (
+        <section id="message-actions" className="flex min-w-0 flex-wrap items-center gap-2">
+          {canRetry && !hasFailure && (
             <Button
               variant="secondary"
               size="sm"

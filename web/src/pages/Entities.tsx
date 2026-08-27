@@ -19,7 +19,10 @@ export function EntitiesPage() {
   const [rows, setRows] = React.useState<EntityStat[]>([])
   const [q, setQ] = useHashParam("q")
   const { loading, error, refresh } = usePolling(async () => setRows(await api.entities()))
-  const sort = useSort<EntityStat>()
+  const sort = useSort<EntityStat>(null, {
+    urlKey: "sort",
+    allowedKeys: ["entityType", "entities", "messages", "pending", "inflight", "scheduled", "done", "lastActivityAt"]
+  })
 
   const facetDefs: FacetDef<EntityStat>[] = [
     {

@@ -74,15 +74,19 @@ function axisLabel(ms: number): string {
 export function SpanWaterfall({
   spans,
   height,
+  zoom = 1,
   selectedKey,
   onSelect
 }: {
   spans: TimelineSpan[]
   /** minimum height of the tracks area (px); rows size naturally */
   height?: number
+  /** horizontal time-axis scale; values above 1 make short spans easier to inspect */
+  zoom?: number
   selectedKey?: string | null
   onSelect?: (span: TimelineSpan) => void
 }) {
+  const [scrollTop, setScrollTop] = React.useState(0)
   const timed = spans.filter((s) => Number.isFinite(s.startMs))
   if (timed.length === 0) return null
 
@@ -103,13 +107,28 @@ export function SpanWaterfall({
   const pct = (t: number) => ((t - t0) / range) * 100
 
   const ticks = displayTicks(t0, t1)
-
+  const timelineItems: Array<
+    { kind: "header"; label: string } | { kind: "span"; span: TimelineSpan }
+  > = []
   let lastGroup: string | undefined
   const seenKey = new Set<string>()
+  for (const span of sorted) {
+    if (seenKey.has(span.key)) continue
+    seenKey.add(span.key)
+    if (span.group !== undefined && span.group !== lastGroup) {
+      timelineItems.push({ kind: "header", label: span.group })
+      lastGroup = span.group
+    }
+    timelineItems.push({ kind: "span", span })
+  }
+  const rowHeight = 30
+  const viewportHeight = height ?? Math.min(560, Math.max(180, timelineItems.length * rowHeight + 16))
+  const startIndex = Math.max(0, Math.floor(scrollTop / rowHeight) - 6)
+  const endIndex = Math.min(timelineItems.length, Math.ceil((scrollTop + viewportHeight) / rowHeight) + 6)
 
   return (
     <div className="overflow-x-auto rounded-md border border-kumo-line">
-      <div className="min-w-[680px]">
+      <div className="min-w-0" style={{ minWidth: String(680 * Math.max(1, zoom)) + "px" }}>
         {/* shared time axis */}
         <div className="relative border-b border-kumo-line bg-kumo-recessed px-3 py-1.5">
           <div className="relative ml-[288px] h-4">
@@ -135,14 +154,27 @@ export function SpanWaterfall({
         </div>
 
         {/* rows */}
-        <div className="relative px-3 py-2" style={height ? { minHeight: height } : undefined}>
-          {sorted.map((s) => {
-            const showGroupHeader = s.group !== undefined && s.group !== lastGroup
-            lastGroup = s.group
-            const duplicate = seenKey.has(s.key)
-            seenKey.add(s.key)
-            if (duplicate) return null
-
+        <div
+          data-testid="timeline-viewport"
+          className="relative overflow-y-auto px-3 py-2"
+          style={{ height: viewportHeight }}
+          onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+        >
+          <div className="relative" style={{ height: timelineItems.length * rowHeight }}>
+          {timelineItems.slice(startIndex, endIndex).map((item, offset) => {
+            const index = startIndex + offset
+            if (item.kind === "header") {
+              return (
+                <div
+                  key={"group-" + item.label + "-" + index}
+                  className="absolute inset-x-0 border-b border-kumo-line pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-kumo-subtle"
+                  style={{ top: index * rowHeight + 8, height: rowHeight }}
+                >
+                  {item.label}
+                </div>
+              )
+            }
+            const s = item.span
             const zeroDur = s.endMs <= s.startMs
             const left = pct(s.startMs)
             const width = Math.max(pct(Math.max(s.endMs, s.startMs + 1)) - left, 0.75)
@@ -154,12 +186,7 @@ export function SpanWaterfall({
             const rowLabel = `${typeof s.label === "string" || typeof s.label === "number" ? s.label : "span"} · ${axisLabel(s.endMs - s.startMs).replace(/^\+/, "")} · ${s.tone === "danger" ? "failed" : s.tone === "success" ? "completed" : "active"}`
 
             return (
-              <React.Fragment key={s.key}>
-                {showGroupHeader && (
-                  <div className="mt-2 mb-1 border-b border-kumo-line pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-kumo-subtle first:mt-0">
-                    {s.group}
-                  </div>
-                )}
+              <div key={s.key} className="absolute inset-x-0" style={{ top: index * rowHeight, height: rowHeight }}>
                 <button
                   type="button"
                   className={cn(
@@ -206,9 +233,10 @@ export function SpanWaterfall({
                     )}
                   </div>
                 </button>
-              </React.Fragment>
+              </div>
             )
           })}
+          </div>
         </div>
       </div>
     </div>

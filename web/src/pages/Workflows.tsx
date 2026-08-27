@@ -1,11 +1,10 @@
 import * as React from "react"
-import { X } from "@phosphor-icons/react"
 import { api, type MessageStatus, type Workflow, type WorkflowRun } from "../api.ts"
-import { ActivityDot, FilterChip, SkeletonTable, SortableTh, STICKY_TH, useDialogA11y, useHashParam, rowInteractions, useSort } from "../components/pieces.tsx"
+import { ActivityDot, DetailPanel, FilterChip, SkeletonTable, SortableTh, STICKY_TH, useHashParam, rowInteractions, useSort } from "../components/pieces.tsx"
 import { relTime } from "../format.ts"
 import { FilterBar, presenceFacet, useFacets, type FacetDef } from "../components/filters/index.tsx"
 import { Badge, Card, CardContent, Select, Table, TBody, TD, TH, THead, TR } from "../components/ui.tsx"
-import { ErrorNote, PageHeader, useLive } from "../shell.tsx"
+import { Breadcrumbs, ErrorNote, PageHeader, useLive } from "../shell.tsx"
 import { StatusBadge } from "../components/pieces.tsx"
 import { Empty } from "../kumo"
 import { WorkflowRunPage } from "./WorkflowRunDetail.tsx"
@@ -139,7 +138,10 @@ export function WorkflowRunsPage({
     setRuns((await api.workflowRuns(name)) as RunRow[])
   )
   // stop background polling while the run-detail panel is open so it doesn't rerender under the cursor
-  const sort = useSort<RunRow>()
+  const sort = useSort<RunRow>(null, {
+    urlKey: "sort",
+    allowedKeys: ["executionId", "activityCount", "createdAt"]
+  })
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const facetDefs: FacetDef<RunRow>[] = [
@@ -157,10 +159,8 @@ export function WorkflowRunsPage({
 
   return (
     <div>
+      <Breadcrumbs items={[{ label: "Workflows", href: "#/workflows" }, { label: name }]} />
       <PageHeader title={name} subtitle="workflow executions">
-        <a href="#/workflows" className="text-[13px] text-kumo-subtle hover:text-kumo-default">
-          ← all workflows
-        </a>
         <Select
           aria-label="filter by status"
           value={statusFilter}
@@ -193,8 +193,8 @@ export function WorkflowRunsPage({
             <TR>
               <SortableTh label="Execution" sortKey="executionId" sort={sort} />
               <TH className={STICKY_TH}>Status</TH>
-              <SortableTh label="Activities" sortKey="activityCount" sort={sort} className="text-right" />
-              <SortableTh label="Started" sortKey="createdAt" sort={sort} />
+              <SortableTh label="Activities" sortKey="activityCount" sort={sort} className="hidden text-right sm:table-cell" />
+              <SortableTh label="Started" sortKey="createdAt" sort={sort} className="hidden sm:table-cell" />
             </TR>
           </THead>
           <TBody>
@@ -222,8 +222,8 @@ export function WorkflowRunsPage({
                 <TD>
                   <StatusBadge status={r.status as MessageStatus} />
                 </TD>
-                <TD className="tabular-nums text-kumo-subtle">{r.activityCount}</TD>
-                <TD className="whitespace-nowrap text-kumo-subtle" title={new Date(r.createdAt).toLocaleString()}>
+                <TD className="hidden tabular-nums text-kumo-subtle sm:table-cell">{r.activityCount}</TD>
+                <TD className="hidden whitespace-nowrap text-kumo-subtle sm:table-cell" title={new Date(r.createdAt).toLocaleString()}>
                   {relTime(new Date(r.createdAt).getTime())}
                 </TD>
               </TR>
@@ -267,31 +267,13 @@ function WorkflowRunDetailModal({
   onClose: () => void
   onChanged?: () => void
 }) {
-  const panelRef = useDialogA11y(true)
   return (
-    <div className="fixed inset-0 z-40 flex justify-end bg-black/40" onClick={onClose}>
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label={`${name} / ${executionId}`}
-        tabIndex={-1}
-        className="flex h-full min-w-0 w-full max-w-xl flex-col overflow-x-hidden overflow-y-auto overscroll-contain border-l border-kumo-line bg-kumo-base p-4 shadow-xl focus:outline-none"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-3 flex min-w-0 shrink-0 items-center justify-between gap-2">
-          <h2 className="min-w-0 flex-1 overflow-hidden text-sm font-semibold">
-            {name} <span className="font-mono text-xs text-kumo-subtle">/ {executionId}</span>
-          </h2>
-          <button
-            className="flex shrink-0 cursor-pointer items-center gap-1 rounded px-2 py-1 text-[12px] text-kumo-subtle hover:bg-kumo-tint hover:text-kumo-default"
-            onClick={onClose}
-          >
-            <X className="h-3.5 w-3.5" /> close
-          </button>
-        </div>
+    <DetailPanel
+      open
+      onClose={onClose}
+      title={<><span>{name}</span> <span className="font-mono text-xs text-kumo-subtle">/ {executionId}</span></>}
+    >
         <WorkflowRunPage name={name} executionId={executionId} onChanged={onChanged} />
-      </div>
-    </div>
+    </DetailPanel>
   )
 }
