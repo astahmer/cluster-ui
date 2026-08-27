@@ -14,7 +14,7 @@ import { config } from "./config.ts"
 import { makeRedisRepo } from "./redis-repo.ts"
 import { makePostgresRepo } from "./postgres-repo.ts"
 import { queryRunnerFibers, queryRunnerLogs } from "./singletons.ts"
-import { makeRepo, openDb, type MessageQuery, type Repo } from "./queries.ts"
+import { makeRepo, openDb, type MessageQuery, type Repo, type TraceQuery } from "./queries.ts"
 import { queryRunnerState } from "./singletons.ts"
 import { actor, alertCluster, createAlert, deleteAlert, listAlerts, listAudit, recordAudit, role, testAlert, updateAlert } from "./ops.ts"
 
@@ -99,6 +99,21 @@ function intParam(u: string | null | undefined): number | undefined {
   const n = Number(u)
   return Number.isFinite(n) ? Math.trunc(n) : undefined
 }
+
+const traceSorts = ["newest", "oldest", "duration", "spans", "failures"] as const
+const traceStatuses = ["all", "healthy", "failed"] as const
+
+const traceQuery = (params: Record<string, string | undefined>): TraceQuery => ({
+  limit: params.limit ? intParam(params.limit) : undefined,
+  offset: intParam(params.offset),
+  q: params.q || undefined,
+  service: params.service || undefined,
+  status: traceStatuses.find((status) => status === params.status) ?? "all",
+  minDurationMs: intParam(params.minDurationMs),
+  sort: traceSorts.find((sort) => sort === params.sort) ?? "newest",
+  createdAfter: intParam(params.createdAfter),
+  createdBefore: intParam(params.createdBefore)
+})
 
 /** request with merged path params + query params */
 /** json() that also accepts promises (redis repo methods are all async) */
@@ -790,15 +805,7 @@ export const api = HttpRouter.concat(HttpRouter.concat(HttpRouter.concat(baseRou
     Effect.flatMap(req, (p) => {
       const repo = repoFor(p.cluster)
       if (!repo) return Effect.succeed(notFound("cluster"))
-      return jsonMaybeAsync(
-        repo.traces({
-          limit: p.limit ? intParam(p.limit) ?? 50 : 50,
-          offset: intParam(p.offset) ?? 0,
-          q: typeof p.q === "string" && p.q !== "" ? p.q : undefined,
-          createdAfter: intParam(p.createdAfter),
-          createdBefore: intParam(p.createdBefore)
-        })
-      )
+      return jsonMaybeAsync(repo.traces(traceQuery(p)))
     })
   ),
 

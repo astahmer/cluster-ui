@@ -76,6 +76,20 @@ export interface TraceSummary {
   lastAt: number
 }
 
+export type TraceSort = "newest" | "oldest" | "duration" | "spans" | "failures"
+
+export interface TraceQuery {
+  limit?: number
+  offset?: number
+  q?: string
+  service?: string
+  status?: "all" | "healthy" | "failed"
+  minDurationMs?: number
+  sort?: TraceSort
+  createdAfter?: number
+  createdBefore?: number
+}
+
 /** Paged trace listing (UX P1-15): rows + total for the pager. */
 export interface TraceList {
   rows: TraceSummary[]
@@ -610,19 +624,23 @@ export function makeRepo(db: Database.Database, prefix: string = config.prefix) 
   }
 
   /** Recent traces: non-null trace_ids grouped, newest first. Optional id-substring search + offset paging (UX P1-15). */
-  const traces = (opts: { limit?: number; offset?: number; q?: string; createdAfter?: number; createdBefore?: number } = {}): TraceList => {
+  const traces = (opts: TraceQuery = {}): TraceList => {
     const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200)
     const offset = Math.max(opts.offset ?? 0, 0)
     const q = opts.q?.trim() ?? ""
     const createdAfter = opts.createdAfter
     const createdBefore = opts.createdBefore
+    const service = opts.service?.trim() ?? ""
+    const status = opts.status ?? "all"
+    const minDurationMs = opts.minDurationMs
+    const sort = opts.sort ?? "newest"
     // escape LIKE wildcards in the user-supplied substring
     const pattern = q === "" ? null : `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`
     const clauses = ["m.trace_id IS NOT NULL AND m.trace_id != ''"]
     const searchParams: Array<string | number> = []
     if (pattern !== null) {
-      clauses.push("m.trace_id LIKE ? ESCAPE '\\'")
-      searchParams.push(pattern)
+      clauses.push("m.trace_id LIKE ? ESCAPE ?")
+      searchParams.push(pattern, "\\")
     }
     if (createdAfter !== undefined && Number.isFinite(createdAfter)) {
       clauses.push("m.id >= ?")
@@ -632,11 +650,34 @@ export function makeRepo(db: Database.Database, prefix: string = config.prefix) 
       clauses.push("m.id <= ?")
       searchParams.push(snowflakeCeil(createdBefore))
     }
+    if (service !== "") {
+      clauses.push(`EXISTS (SELECT 1 FROM ${t.messages} service_message WHERE service_message.trace_id = m.trace_id AND service_message.entity_type LIKE ? ESCAPE ?)`)
+      searchParams.push(`%${service.replace(/[\\%_]/g, (c) => `\\${c}`)}%`, "\\")
+    }
     const where = `WHERE ${clauses.join(" AND ")}`
+    const having: string[] = []
+    const havingParams: Array<string | number> = []
+    if (status === "failed") {
+      having.push(`SUM(CASE WHEN ${failedExistsFor("id")} THEN 1 ELSE 0 END) > 0`)
+    } else if (status === "healthy") {
+      having.push(`SUM(CASE WHEN ${failedExistsFor("id")} THEN 1 ELSE 0 END) = 0`)
+    }
+    if (minDurationMs !== undefined && Number.isFinite(minDurationMs) && minDurationMs > 0) {
+      having.push("((MAX(m.id) >> 22) - (MIN(m.id) >> 22)) >= ?")
+      havingParams.push(Math.trunc(minDurationMs))
+    }
+    const havingClause = having.length > 0 ? `HAVING ${having.join(" AND ")}` : ""
+    const orderBy: Record<TraceSort, string> = {
+      newest: "MAX(m.id) DESC",
+      oldest: "MIN(m.id) ASC",
+      duration: "(MAX(m.id) - MIN(m.id)) DESC, MAX(m.id) DESC",
+      spans: "COUNT(*) DESC, MAX(m.id) DESC",
+      failures: `SUM(CASE WHEN ${failedExistsFor("id")} THEN 1 ELSE 0 END) DESC, MAX(m.id) DESC`
+    }
 
     const totalRow = db
-      .prepare(`SELECT COUNT(DISTINCT m.trace_id) as total FROM ${t.messages} m ${where}`)
-      .get(...searchParams) as { total: number | bigint } | undefined
+      .prepare(`SELECT COUNT(*) as total FROM (SELECT m.trace_id FROM ${t.messages} m ${where} GROUP BY m.trace_id ${havingClause}) grouped_traces`)
+      .get(...searchParams, ...havingParams) as { total: number | bigint } | undefined
 
     const rows = db
       .prepare(
@@ -648,10 +689,11 @@ export function makeRepo(db: Database.Database, prefix: string = config.prefix) 
          FROM ${t.messages} m
          ${where}
          GROUP BY m.trace_id
-         ORDER BY MAX(m.id) DESC
+         ${havingClause}
+         ORDER BY ${orderBy[sort]}
          LIMIT ? OFFSET ?`
       )
-      .all(...searchParams, limit, offset) as ReadonlyArray<{
+      .all(...searchParams, ...havingParams, limit, offset) as ReadonlyArray<{
       traceId: string
       count: number | bigint
       failedCount: number | bigint

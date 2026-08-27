@@ -9,6 +9,7 @@ import {
   type MessageQuery,
   type RawMessageRow,
   type Repo,
+  type TraceQuery,
 } from "./queries.ts";
 
 const INFLIGHT_WINDOW_MS = 5 * 60 * 1000;
@@ -506,21 +507,15 @@ const makePostgresRepo = (url: string, prefix = "cluster"): Repo => {
   };
 
   const traces = async (
-    opts: {
-      limit?: number;
-      offset?: number;
-      q?: string;
-      createdAfter?: number;
-      createdBefore?: number;
-    } = {},
+    opts: TraceQuery = {},
   ) => {
     const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200),
       offset = Math.max(opts.offset ?? 0, 0);
     const clauses = ["m.trace_id IS NOT NULL AND m.trace_id != ''"],
       params: unknown[] = [];
     if (opts.q?.trim()) {
-      clauses.push("m.trace_id LIKE ? ESCAPE '\\\\'");
-      params.push(`%${opts.q.trim().replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
+      clauses.push("m.trace_id LIKE ? ESCAPE ?");
+      params.push(`%${opts.q.trim().replace(/[\\%_]/g, (c) => `\\${c}`)}%`, "\\");
     }
     if (opts.createdAfter !== undefined) {
       clauses.push("m.id >= ?");
@@ -530,14 +525,38 @@ const makePostgresRepo = (url: string, prefix = "cluster"): Repo => {
       clauses.push("m.id <= ?");
       params.push(snowflakeCeil(opts.createdBefore));
     }
+    if (opts.service?.trim()) {
+      clauses.push(`EXISTS (SELECT 1 FROM ${messages} service_message WHERE service_message.trace_id = m.trace_id AND service_message.entity_type ILIKE ? ESCAPE ?)`);
+      params.push(`%${opts.service.trim().replace(/[\\%_]/g, (c) => `\\${c}`)}%`, "\\");
+    }
     const where = `WHERE ${clauses.join(" AND ")}`;
+    const having: string[] = [];
+    const havingParams: number[] = [];
+    if (opts.status === "failed") {
+      having.push(`SUM(CASE WHEN ${failedExists(replies, "m.id")} THEN 1 ELSE 0 END) > 0`);
+    } else if (opts.status === "healthy") {
+      having.push(`SUM(CASE WHEN ${failedExists(replies, "m.id")} THEN 1 ELSE 0 END) = 0`);
+    }
+    if (opts.minDurationMs !== undefined && Number.isFinite(opts.minDurationMs) && opts.minDurationMs > 0) {
+      having.push("((MAX(m.id) >> 22) - (MIN(m.id) >> 22)) >= ?");
+      havingParams.push(Math.trunc(opts.minDurationMs));
+    }
+    const havingClause = having.length > 0 ? `HAVING ${having.join(" AND ")}` : "";
+    const orderBy: Record<NonNullable<TraceQuery["sort"]>, string> = {
+      newest: "MAX(m.id) DESC",
+      oldest: "MIN(m.id) ASC",
+      duration: "(MAX(m.id) - MIN(m.id)) DESC, MAX(m.id) DESC",
+      spans: "COUNT(*) DESC, MAX(m.id) DESC",
+      failures: `SUM(CASE WHEN ${failedExists(replies, "m.id")} THEN 1 ELSE 0 END) DESC, MAX(m.id) DESC`,
+    };
+    const selectedOrder = orderBy[opts.sort ?? "newest"];
     const totalRows = await query<{ total: string }>(
-      `SELECT COUNT(DISTINCT m.trace_id)::text AS total FROM ${messages} m ${where}`,
-      params,
+      `SELECT COUNT(*)::text AS total FROM (SELECT m.trace_id FROM ${messages} m ${where} GROUP BY m.trace_id ${havingClause}) grouped_traces`,
+      [...params, ...havingParams],
     );
     const rows = await query(
-      `SELECT m.trace_id AS "traceId", COUNT(*)::text AS count, SUM(CASE WHEN ${failedExists(replies, "m.id")} THEN 1 ELSE 0 END)::text AS "failedCount", MIN(m.id)::text AS "firstId", MAX(m.id)::text AS "lastId", ARRAY_AGG(DISTINCT m.kind) AS kinds, ARRAY_AGG(DISTINCT m.entity_type) AS services FROM ${messages} m ${where} GROUP BY m.trace_id ORDER BY MAX(m.id) DESC LIMIT ? OFFSET ?`,
-      [...params, limit, offset],
+      `SELECT m.trace_id AS "traceId", COUNT(*)::text AS count, SUM(CASE WHEN ${failedExists(replies, "m.id")} THEN 1 ELSE 0 END)::text AS "failedCount", MIN(m.id)::text AS "firstId", MAX(m.id)::text AS "lastId", ARRAY_AGG(DISTINCT m.kind) AS kinds, ARRAY_AGG(DISTINCT m.entity_type) AS services FROM ${messages} m ${where} GROUP BY m.trace_id ${havingClause} ORDER BY ${selectedOrder} LIMIT ? OFFSET ?`,
+      [...params, ...havingParams, limit, offset],
     );
     return {
       rows: rows.map((row) => ({
