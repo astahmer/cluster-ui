@@ -248,9 +248,16 @@ export function WorkflowRunPage({
 
   const canRetry = run.status === "done"
   const canCancel = run.status === "pending" || run.status === "inflight" || run.status === "scheduled"
+  const messageDetailHref = (messageId: string) => {
+    const params = new URLSearchParams({
+      returnTo: `/workflows/${encodeURIComponent(name)}/${encodeURIComponent(executionId)}`,
+      returnLabel: "back to workflow run"
+    })
+    return `#/messages/${encodeURIComponent(messageId)}?${params.toString()}`
+  }
 
   return (
-    <div className="space-y-4 text-[13px]">
+    <div className="min-w-0 max-w-full space-y-4 overflow-x-hidden text-[13px]">
       {result && (
         <OutcomeBanner outcome={result.outcome} exit={result.exit} />
       )}
@@ -320,7 +327,7 @@ export function WorkflowRunPage({
                       <button type="button" className="text-kumo-subtle underline" onClick={() => setSelectedSpanKey(null)}>clear</button>
                     </div>
                     <div className="mt-2 flex flex-wrap gap-4 text-kumo-subtle"><span>started {fmtTime(selected.startMs)}</span><span>duration {formatDuration(selected.endMs - selected.startMs)}</span><span>{selected.durationSource === "recorded" ? "recorded" : "inferred"} timing</span></div>
-                    <a href={`#/messages/${encodeURIComponent(selected.key.replace(/^run-/, ""))}`} className="mt-2 inline-block text-kumo-link hover:underline">open message detail ↗</a>
+                    <a href={messageDetailHref(selected.key.replace(/^run-/, ""))} className="mt-2 inline-block text-kumo-link hover:underline">open message detail ↗</a>
                   </div>
                 )
               })()}
@@ -329,7 +336,7 @@ export function WorkflowRunPage({
         </Card>
       )}
 
-      <section className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg border border-kumo-line bg-kumo-recessed p-3">
+      <section className="grid min-w-0 grid-cols-1 gap-x-4 gap-y-2 rounded-lg border border-kumo-line bg-kumo-recessed p-3 sm:grid-cols-2">
         <Field label="Execution">
           <span className="font-mono text-xs">{executionId}</span>
         </Field>
@@ -338,12 +345,12 @@ export function WorkflowRunPage({
         </Field>
         <Field label="Started">{fmtTime(run.createdAt)}</Field>
         <Field label="Run message">
-          <a href={`#/messages/${encodeURIComponent(run.id)}`} className="font-mono text-xs text-kumo-link hover:underline">{run.id} ↗</a>
+          <a href={messageDetailHref(run.id)} className="font-mono text-xs text-kumo-link hover:underline">{run.id} ↗</a>
         </Field>
       </section>
 
       {(canRetry || canCancel) && (
-        <section className="flex items-center gap-2">
+        <section className="flex flex-wrap items-center gap-2">
           {canRetry && (
             <Button size="sm" disabled={busy || readonly} title={readonly ? "read-only mode" : undefined} onClick={() => void act("retry")}>
               <ArrowClockwise className="h-3.5 w-3.5" /> retry run
@@ -477,9 +484,9 @@ function OutcomeBanner({ outcome, exit }: { outcome: "Success" | "Failure"; exit
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex min-w-0 flex-col gap-1">
       <span className="text-[11px] font-semibold uppercase tracking-wide text-kumo-subtle">{label}</span>
-      <span className="truncate">{children}</span>
+      <span className="block min-w-0 max-w-full break-words">{children}</span>
     </div>
   )
 }

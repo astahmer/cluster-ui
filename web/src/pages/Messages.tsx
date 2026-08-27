@@ -91,11 +91,13 @@ function replaceMessageSearch(values: {
 
 export function MessagesPage({
   initialFilters,
-  messageId
+  messageId,
+  backLink
 }: {
   initialFilters?: MessagesInitialFilters
   /** deep link #/messages/<id> — the detail panel hydrates from this */
   messageId?: string
+  backLink?: { href: string; label: string }
 }) {
   const [data, setData] = React.useState<{ rows: Message[]; total: number } | null>(null)
 
@@ -126,6 +128,10 @@ export function MessagesPage({
     const raw = window.location.hash.slice(1) || "/messages"
     const qIdx = raw.indexOf("?")
     const params = new URLSearchParams(qIdx === -1 ? "" : raw.slice(qIdx + 1))
+    if (id === null) {
+      params.delete("returnTo")
+      params.delete("returnLabel")
+    }
     const qs = params.toString()
     window.location.hash = `/messages${id !== null ? `/${encodeURIComponent(id)}` : ""}${qs ? `?${qs}` : ""}`
   }, [])
@@ -549,7 +555,7 @@ export function MessagesPage({
         ) : detailState.detail === null ? (
           <div className="text-kumo-subtle">loading…</div>
         ) : (
-          <MessageDetailBody d={detailState.detail} config={config} onAction={runAction} onChanged={refresh} />
+          <MessageDetailBody d={detailState.detail} config={config} backLink={backLink} onAction={runAction} onChanged={refresh} />
         )}
       </DetailPanel>
     </div>
@@ -714,7 +720,7 @@ function PayloadView({ value, max = 400 }: { value: unknown; max?: number }) {
   }
   return (
     <div className="flex flex-col items-start gap-1">
-      <div className="max-h-64 max-w-full overflow-auto [&_pre]:max-h-64">
+      <div className="min-w-0 max-w-full overflow-x-auto [&_pre]:max-h-64 [&_pre]:max-w-full [&_pre]:whitespace-pre-wrap [&_pre]:break-words">
         <CodeBlock code={text} lang="jsonc" />
       </div>
       {text.length > max && (
@@ -729,11 +735,13 @@ function PayloadView({ value, max = 400 }: { value: unknown; max?: number }) {
 function MessageDetailBody({
   d,
   config,
+  backLink,
   onAction,
   onChanged
 }: {
   d: MessageDetail
   config: Awaited<ReturnType<typeof api.config>> | null
+  backLink?: { href: string; label: string }
   onAction: (fn: () => Promise<unknown>, what: string) => Promise<void>
   onChanged: () => void
 }) {
@@ -771,7 +779,15 @@ function MessageDetailBody({
     })?.kind ?? "sqlite"
 
   return (
-    <div className="space-y-4 text-[13px]" data-testid="message-detail">
+    <div className="min-w-0 max-w-full space-y-4 overflow-x-hidden text-[13px]" data-testid="message-detail">
+      {backLink && (
+        <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-md border border-kumo-line bg-kumo-canvas/50 px-3 py-2">
+          <span className="text-[11px] uppercase tracking-wide text-kumo-subtle">opened from</span>
+          <a href={"#" + backLink.href} className="min-w-0 max-w-full break-words text-[12px] font-medium text-kumo-link hover:underline">
+            ← {backLink.label}
+          </a>
+        </div>
+      )}
       {d.result && <OutcomeBanner result={d.result} />}
 
       {m.failed && !d.result && (
@@ -785,7 +801,7 @@ function MessageDetailBody({
 
       {clusterKind === "redis" && <JobFlowSection messageId={m.id} />}
 
-      <section className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg border border-kumo-line bg-kumo-canvas/50 p-3">
+      <section className="grid min-w-0 grid-cols-1 gap-x-4 gap-y-2 rounded-lg border border-kumo-line bg-kumo-canvas/50 p-3 sm:grid-cols-2">
           <Field label="Status">
             <div className="flex items-center gap-1.5">
             {m.failed && (
@@ -830,7 +846,7 @@ function MessageDetailBody({
       </section>
 
       {(canRetry || canInterrupt || canResetActivity) && (
-        <section className="flex items-center gap-2">
+        <section className="flex min-w-0 flex-wrap items-center gap-2">
           {canRetry && (
             <Button
               variant="secondary"
@@ -875,7 +891,7 @@ function MessageDetailBody({
               <ArrowUpRight className="h-3.5 w-3.5" /> promote now
             </Button>
           )}
-          <span className="ml-auto flex items-center gap-1">
+          <span className="flex w-full flex-wrap items-center gap-1 sm:ml-auto sm:w-auto">
             <Button variant="ghost" size="sm" onClick={() => copyJson(d)}>
               copy json
             </Button>
@@ -915,14 +931,14 @@ function MessageDetailBody({
         ) : (
           <div className="space-y-2">
             {d.replies.map((r) => (
-              <div key={r.id} className="rounded-md border border-kumo-line p-2.5">
-                <div className="mb-1.5 flex items-center gap-2 text-[12px]">
+              <div key={r.id} className="min-w-0 rounded-md border border-kumo-line p-2.5">
+                <div className="mb-1.5 flex min-w-0 flex-wrap items-center gap-2 text-[12px]">
                   <Badge tone={r.kind === "withExit" ? (isFailureReply(r.payload) ? "err" : "ok") : "neutral"}>
                     {r.kind}
                   </Badge>
                   {r.acked && <Badge tone="accent">acked</Badge>}
                   {r.sequence !== null && <span className="text-kumo-subtle">seq {r.sequence}</span>}
-                  <span className="ml-auto flex items-center gap-1 font-mono text-[11px] text-kumo-subtle">
+                  <span className="ml-auto flex min-w-0 items-center gap-1 font-mono text-[11px] text-kumo-subtle">
                     #{shortId(r.id)}
                     <button
                       type="button"
@@ -966,9 +982,9 @@ export function Field({
   wide?: boolean
 }) {
   return (
-    <div className={wide ? "col-span-2 flex flex-col gap-1" : "flex flex-col gap-1"}>
+    <div className={wide ? "col-span-1 flex min-w-0 flex-col gap-1 sm:col-span-2" : "flex min-w-0 flex-col gap-1"}>
       <span className="text-[11px] font-semibold uppercase tracking-wide text-kumo-subtle">{label}</span>
-      <span className="truncate">{children}</span>
+      <span className="block min-w-0 max-w-full break-words">{children}</span>
     </div>
   )
 }

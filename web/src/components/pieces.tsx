@@ -42,7 +42,7 @@ export function JsonBlock({ value, max = 400 }: { value: unknown; max?: number }
   }
   return (
     <div className="flex flex-col items-start gap-1">
-      <pre className="max-h-64 max-w-full overflow-auto rounded-md border border-kumo-line bg-kumo-base p-2.5 text-xs leading-5">
+      <pre className="min-w-0 max-h-64 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-md border border-kumo-line bg-kumo-base p-2.5 text-xs leading-5">
         {text}
       </pre>
       {text.length > max && (
@@ -135,12 +135,12 @@ export function DetailPanel({
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="flex h-full w-full max-w-xl flex-col overflow-y-auto border-l border-kumo-line bg-kumo-base p-4 shadow-xl focus:outline-none"
+        className="flex h-full min-w-0 w-full max-w-xl flex-col overflow-x-hidden overflow-y-auto overscroll-contain border-l border-kumo-line bg-kumo-base p-4 shadow-xl focus:outline-none"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="mb-3 flex items-center justify-between">
-          <h2 id={titleId} className="min-w-0 text-sm font-semibold">{title}</h2>
-          <Button variant="ghost" size="sm" onClick={onClose}>
+        <div className="mb-3 flex min-w-0 shrink-0 items-center justify-between gap-2">
+          <h2 id={titleId} className="min-w-0 flex-1 overflow-hidden text-sm font-semibold">{title}</h2>
+          <Button variant="ghost" size="sm" className="shrink-0" onClick={onClose}>
             <X className="h-3.5 w-3.5" /> close
           </Button>
         </div>

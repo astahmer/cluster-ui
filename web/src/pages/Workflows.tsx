@@ -276,15 +276,15 @@ function WorkflowRunDetailModal({
         aria-modal="true"
         aria-label={`${name} / ${executionId}`}
         tabIndex={-1}
-        className="flex h-full w-full max-w-xl flex-col overflow-y-auto border-l border-kumo-line bg-kumo-base p-4 shadow-xl focus:outline-none"
+        className="flex h-full min-w-0 w-full max-w-xl flex-col overflow-x-hidden overflow-y-auto overscroll-contain border-l border-kumo-line bg-kumo-base p-4 shadow-xl focus:outline-none"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold">
+        <div className="mb-3 flex min-w-0 shrink-0 items-center justify-between gap-2">
+          <h2 className="min-w-0 flex-1 overflow-hidden text-sm font-semibold">
             {name} <span className="font-mono text-xs text-kumo-subtle">/ {executionId}</span>
           </h2>
           <button
-            className="flex cursor-pointer items-center gap-1 rounded px-2 py-1 text-[12px] text-kumo-subtle hover:bg-kumo-tint hover:text-kumo-default"
+            className="flex shrink-0 cursor-pointer items-center gap-1 rounded px-2 py-1 text-[12px] text-kumo-subtle hover:bg-kumo-tint hover:text-kumo-default"
             onClick={onClose}
           >
             <X className="h-3.5 w-3.5" /> close

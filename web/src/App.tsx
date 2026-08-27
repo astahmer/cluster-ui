@@ -32,6 +32,7 @@ const SeededMessagesPage = MessagesPage as unknown as React.ComponentType<{
     createdBefore?: string
   }
   messageId?: string
+  backLink?: { href: string; label: string }
 }>
 
 const TypedEntityInstances = EntityInstancesPage as React.ComponentType<{ entityType: string }>
@@ -129,20 +130,28 @@ export function App() {
           )
         break
       case "messages":
-        content = (
-          <SeededMessagesPage
-            messageId={parts.length >= 2 ? decodeURIComponent(parts[1]) : undefined}
-            initialFilters={{
-              entityType: route.params.get("entityType") ?? undefined,
-              entityId: route.params.get("entityId") ?? undefined,
-              status: route.params.get("status") ?? undefined,
-              failed: route.params.get("failed") ?? undefined,
-              q: route.params.get("q") ?? undefined,
-              createdAfter: route.params.get("createdAfter") ?? undefined,
-              createdBefore: route.params.get("createdBefore") ?? undefined
-            }}
-          />
-        )
+        {
+          const returnTo = route.params.get("returnTo")
+          const backLink = returnTo?.startsWith("/") && !returnTo.startsWith("//") ? {
+            href: returnTo,
+            label: route.params.get("returnLabel") ?? "back to workflow run"
+          } : undefined
+          content = (
+            <SeededMessagesPage
+              messageId={parts.length >= 2 ? decodeURIComponent(parts[1]) : undefined}
+              backLink={backLink}
+              initialFilters={{
+                entityType: route.params.get("entityType") ?? undefined,
+                entityId: route.params.get("entityId") ?? undefined,
+                status: route.params.get("status") ?? undefined,
+                failed: route.params.get("failed") ?? undefined,
+                q: route.params.get("q") ?? undefined,
+                createdAfter: route.params.get("createdAfter") ?? undefined,
+                createdBefore: route.params.get("createdBefore") ?? undefined
+              }}
+            />
+          )
+        }
         break
       case "agent":
         content = <AgentPage />
