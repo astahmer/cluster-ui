@@ -561,6 +561,7 @@ const makePostgresRepo = (url: string, prefix = "cluster"): Repo => {
 
   return {
     db: null,
+    kind: "postgres",
     prefix,
     listMessages,
     getMessage,

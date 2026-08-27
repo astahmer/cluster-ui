@@ -31,6 +31,13 @@ const repos = new Map<string, Repo>(
 )
 const defaultRepo = repos.get(config.clusters[0].name)!
 
+type RepoKind = "sqlite" | "postgres" | "redis"
+
+const repoKind = (repo: Repo): RepoKind => {
+  const explicitKind = (repo as Repo & { kind?: RepoKind }).kind
+  return explicitKind ?? (repo.db === null ? "redis" : "sqlite")
+}
+
 /** repo list for the metrics sampler */
 export const clusterRepos = (): ReadonlyArray<[string, Repo]> => [...repos.entries()]
 
@@ -182,7 +189,10 @@ async function dispatchAction(
   sqliteRun: (repo: Repo, id: string) => { ok: true },
   messageId: string
 ): Promise<{ ok: true }> {
-  if (repo.db === null) {
+  if (repoKind(repo) === "postgres") {
+    throw new ActionError("actions are not supported for PostgreSQL clusters", 400)
+  }
+  if (repoKind(repo) === "redis") {
     const redisActions = (repo as unknown as { actions?: RedisActionMap }).actions
     const fn = redisActions?.[redisName]
     if (!fn) throw new ActionError(`${redisName} not supported for this cluster type`, 400)
@@ -534,7 +544,7 @@ function redisOnlyHandler(
         if (role === "viewer") throw new ActionError("operator role required", 403)
         const repo = repoFor(p.cluster ?? p.body?.cluster)
         if (!repo) return notFound("cluster")
-        if (repo.db === null) {
+        if (repoKind(repo) === "redis") {
           const result = await run(repo as never, p.body ?? {})
           recordAudit({ actor, role, action: "redis-operation", cluster: p.cluster ?? p.body?.cluster ?? config.clusters[0].name, target: typeof p.body?.queue === "string" ? p.body.queue : typeof p.body?.id === "string" ? p.body.id : "redis" })
           return json(result)
@@ -628,7 +638,7 @@ const redisRouter = HttpRouter.empty.pipe(
         Effect.sync(() => repoFor(params.cluster)),
         (repo) => {
           if (!repo) return Effect.succeed(notFound("cluster"))
-          if (repo.db !== null) return Effect.succeed(json([]))
+          if (repoKind(repo) !== "redis") return Effect.succeed(json([]))
           return Effect.tryPromise(async () => json(await (repo as never as RedisRepoExtras).queues()))
         }
       )
@@ -639,7 +649,7 @@ const redisRouter = HttpRouter.empty.pipe(
     Effect.flatMap(req, (p) => {
       const repo = repoFor(p.cluster)
       if (!repo) return Effect.succeed(notFound("cluster"))
-      if (repo.db !== null || !(repo as unknown as RedisRepoExtras).queueJobs) {
+      if (repoKind(repo) !== "redis" || !(repo as unknown as RedisRepoExtras).queueJobs) {
         return Effect.succeed(
           HttpServerResponse.unsafeJson({ error: "queue jobs are only supported for redis clusters" }, { status: 400 })
         )
@@ -658,7 +668,7 @@ const redisRouter = HttpRouter.empty.pipe(
     Effect.flatMap(req, (p) => {
       const repo = repoFor(p.cluster)
       if (!repo) return Effect.succeed(notFound("cluster"))
-      if (repo.db !== null || !(repo as unknown as RedisRepoExtras).jobDetail) {
+      if (repoKind(repo) !== "redis" || !(repo as unknown as RedisRepoExtras).jobDetail) {
         return Effect.succeed(
           HttpServerResponse.unsafeJson({ error: "queue jobs are only supported for redis clusters" }, { status: 400 })
         )
@@ -674,7 +684,7 @@ const redisRouter = HttpRouter.empty.pipe(
     Effect.flatMap(req, (p) => {
       const repo = repoFor(p.cluster)
       if (!repo) return Effect.succeed(notFound("cluster"))
-      if (repo.db !== null || !(repo as unknown as RedisRepoExtras).jobTree) {
+      if (repoKind(repo) !== "redis" || !(repo as unknown as RedisRepoExtras).jobTree) {
         return Effect.succeed(
           HttpServerResponse.unsafeJson({ error: "not supported for this cluster type" }, { status: 400 })
         )
