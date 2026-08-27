@@ -284,11 +284,15 @@ async function runVariant(label, clusterParam) {
     await page.waitForTimeout(1200)
     const panelText = await bodyText()
     check(`[${label}] trace side panel opens with waterfall`, panelText.includes("waterfall") && (await page.locator(".fixed.inset-0").count()) > 0)
+    check(`[${label}] trace side panel selection is URL-persisted`, /[?&]trace=[^&]+/.test(await page.evaluate(() => window.location.hash)))
     // multi-span seeded traces must draw overlapping duration bars, not point markers
     if (label === "sqlite") {
       const bars = await page.locator(".fixed.inset-0 .relative.h-4.flex-1 span.rounded-sm").count()
       check(`[sqlite] waterfall draws duration bars`, bars >= 3)
     }
+    const tracePanelHash = await page.evaluate(() => window.location.hash)
+    await goto(tracePanelHash.slice(1), 1200)
+    check(`[${label}] trace side panel reopens from URL`, (await page.locator(".fixed.inset-0").count()) > 0 && (await bodyText()).includes("waterfall"))
     check(`[${label}] trace panel no page errors`, errors.length === 0)
     if (errors.length > 0) console.log("   ", errors.slice(0, 3))
     await page.screenshot({ path: `/tmp/cluster-ui-shots/trace-panel-${label}.png` })
