@@ -114,6 +114,12 @@ async function runChecks() {
     (b) => Array.isArray(b.rows) && b.rows.length > 0
   )
   void rangeTraces
+  const traceService = String(traces.rows[0]?.services[0] ?? "")
+  await check(
+    "traces filters and sorting",
+    `/api/traces?status=all&service=${encodeURIComponent(traceService)}&sort=duration&limit=5`,
+    (b) => Array.isArray(b.rows) && b.rows.length > 0 && b.rows.every((row: any) => row.services.includes(traceService))
+  )
   const wfs = await check("workflows", "/api/workflows", (b) =>
     Array.isArray(b) && b.every((w: any) => "failedRuns" in w))
   const msgs = await check("messages list", "/api/messages?pageSize=5", (b) => b.rows?.length === 5 && b.total > 0)

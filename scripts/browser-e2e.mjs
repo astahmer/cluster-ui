@@ -280,7 +280,9 @@ async function runVariant(label, clusterParam) {
   if ((await traceRow.count()) > 0) {
     // open the multi-span checkout cascade (7 spans) rather than whatever is newest
     const cascadeRow = page.locator("table tbody tr", { hasText: "ApiGateway" }).first()
-    await (await cascadeRow.count() > 0 ? cascadeRow : traceRow).click()
+    const traceOpenButton = page.getByRole("button", { name: /open trace / }).first()
+    const cascadeOpenButton = cascadeRow.getByRole("button", { name: /open trace / }).first()
+    await (await cascadeRow.count() > 0 ? cascadeOpenButton : traceOpenButton).click()
     await page.waitForTimeout(1200)
     const panelText = await bodyText()
     check(`[${label}] trace side panel opens with waterfall`, panelText.includes("waterfall") && (await page.locator(".fixed.inset-0").count()) > 0)
@@ -299,16 +301,28 @@ async function runVariant(label, clusterParam) {
     await page.keyboard.press("Escape")
     await page.waitForTimeout(400)
     check(`[${label}] Escape closes trace panel`, (await page.locator(".fixed.inset-0").count()) === 0)
+    await page.getByRole("button", { name: /open trace / }).first().click()
+    await page.waitForTimeout(300)
+    await page.goBack()
+    await page.waitForTimeout(500)
+    check(`[${label}] browser back closes trace panel`, (await page.locator(".fixed.inset-0").count()) === 0)
+    await page.goForward()
+    await page.waitForTimeout(500)
+    check(`[${label}] browser forward restores trace panel`, (await page.locator(".fixed.inset-0").count()) > 0)
+    await page.keyboard.press("Escape")
+    await page.waitForTimeout(300)
   }
 
   // --- trace detail investigation controls ---------------------------------
   if (label === "sqlite" && (await traceRow.count()) > 0) {
     await goto("/traces")
-    const detailLink = page.locator('a[href^="#/traces/"]').first()
+    const detailLink = page.locator('table a[href^="#/traces/"]').first()
     if ((await detailLink.count()) > 0) {
       await detailLink.click()
       await page.waitForTimeout(1400)
       check("[" + label + "] trace waterfall has virtual viewport", (await page.locator('[data-testid="timeline-viewport"]').count()) === 1)
+      check("[" + label + "] trace detail has breadcrumbs", (await page.getByRole("navigation", { name: "Breadcrumb" }).count()) === 1)
+      check("[" + label + "] trace detail has permalink action", (await page.getByRole("button", { name: "copy link" }).count()) === 1)
       const zoomIn = page.getByRole("button", { name: "Zoom in timeline" }).first()
       if ((await zoomIn.count()) > 0) {
         await zoomIn.click()
@@ -325,6 +339,24 @@ async function runVariant(label, clusterParam) {
         await spanButton.click()
         check(`[${label}] trace detail selects a span`, (await bodyText()).includes("Selected span"))
       }
+      await page.goto(`http://localhost:${PORT}/#/traces?pageSize=25`, { waitUntil: "networkidle" })
+      await page.waitForTimeout(900)
+      check(`[${label}] trace list page size is URL-persisted`, (await page.locator('select[aria-label="trace page size"]').inputValue()) === "25")
+      const jumpToPage = page.locator('input[aria-label="Go to page"]')
+      const traceTotalText = await bodyText()
+      const traceTotal = Number(traceTotalText.match(/(\d+) traces? · showing/)?.[1] ?? 0)
+      check(`[${label}] trace list pager exposes a direct page jump when paged`, (await jumpToPage.count()) === 1 || traceTotal <= 25)
+      if ((await jumpToPage.count()) > 0) {
+        await jumpToPage.fill("2")
+        await jumpToPage.press("Enter")
+        await page.waitForTimeout(500)
+        check(`[${label}] direct page jump updates the URL`, (await page.evaluate(() => window.location.hash)).includes("page=2"))
+      }
+      const traceMobileCards = page.locator("article").filter({ has: page.getByRole("button", { name: /open trace / }) })
+      await page.setViewportSize({ width: 390, height: 844 })
+      check(`[${label}] mobile trace cards are visible`, (await traceMobileCards.count()) > 0)
+      check(`[${label}] mobile trace list avoids page overflow`, await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1))
+      await page.setViewportSize({ width: 1440, height: 900 })
     }
   }
 
