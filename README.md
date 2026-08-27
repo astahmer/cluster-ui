@@ -87,9 +87,17 @@ from the id itself.
 ## Verification
 
 ```sh
-pnpm e2e     # boots the API router and exercises every endpoint
-pnpm smoke   # headless jsdom render test of the built frontend
+pnpm e2e          # API contract checks
+pnpm smoke        # headless jsdom render test of the built frontend
+pnpm e2e:browser   # existing focused Playwright browser sweep
+pnpm e2e:bdd       # generate and run all Playwright BDD .feature scenarios
 ```
+
+`pnpm e2e:bdd` builds an isolated SQLite database and ephemeral Redis instance,
+starts the dashboard, runs the feature files under `tests/bdd/features/`, and
+writes generated specs to the ignored `tests/bdd/.features-gen/` directory.
+Install a Playwright Chromium browser if your machine does not already have
+one cached.
 
 ## Notes
 

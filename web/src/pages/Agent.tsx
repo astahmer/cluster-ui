@@ -100,6 +100,23 @@ const noopPersistence = {
   },
   compactConversation: async () => {
     throw new Error("persistence disabled")
+  },
+  listMemories: async () => [],
+  loadMemorySummary: async () => undefined,
+  updateMemorySummary: async () => {
+    throw new Error("persistence disabled")
+  },
+  createMemory: async () => {
+    throw new Error("persistence disabled")
+  },
+  deleteMemory: async () => {},
+  generateSuggestions: async () => [],
+  listThreads: async () => [],
+  createThread: async () => {
+    throw new Error("persistence disabled")
+  },
+  loadThread: async () => {
+    throw new Error("persistence disabled")
   }
 } as never
 

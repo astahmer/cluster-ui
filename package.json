@@ -18,6 +18,8 @@
     "redis:cli": "redis-cli -p 6399",
     "dev": "bash scripts/dev-all.sh",
     "e2e:browser": "node scripts/browser-e2e.mjs",
+    "e2e:bdd": "bddgen && playwright test",
+    "e2e:bdd:generate": "bddgen",
     "try:redis": "bash scripts/try-redis.sh"
   },
   "dependencies": {
@@ -55,6 +57,7 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
+    "@playwright/test": "1.62.1",
     "@tailwindcss/vite": "4.3.3",
     "@types/better-sqlite3": "9.6.0",
     "@types/node": "26.2.0",
@@ -62,6 +65,7 @@
     "@types/react-dom": "19.2.5",
     "@vitejs/plugin-react": "6.1.0",
     "jsdom": "30.0.1",
+    "playwright-bdd": "9.2.0",
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
     "vite": "8.2.2"

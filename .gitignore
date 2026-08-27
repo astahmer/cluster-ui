@@ -4,6 +4,9 @@ data/*.db
 data/*.db-wal
 data/*.db-shm
 data/cluster-ui-state.json
+tests/bdd/.features-gen/
+playwright-report/
+test-results/
 *.log
 .DS_Store
 .direnv/
