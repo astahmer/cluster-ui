@@ -33,7 +33,9 @@ export function TracesPage({
   const [createdAfter, setCreatedAfter] = useHashParam("createdAfter")
   const [createdBefore, setCreatedBefore] = useHashParam("createdBefore")
   const pageSize = 50
-  const [openTraceId, setOpenTraceId] = React.useState<string | null>(null)
+  const [openTraceParam, setOpenTraceParam] = useHashParam("trace")
+  const openTraceId = openTraceParam || null
+  const setOpenTraceId = (traceId: string | null) => setOpenTraceParam(traceId ?? "")
 
   React.useEffect(() => {
     const id = setTimeout(() => {
