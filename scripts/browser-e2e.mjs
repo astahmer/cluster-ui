@@ -234,7 +234,7 @@ async function runVariant(label, clusterParam) {
   // --- queues page (redis: controls; sqlite: empty state) ---
   await goto("/queues", 1200)
   const qText = await bodyText()
-  check(`[${label}] queues page renders`, label === "redis" ? qText.includes("payments") : qText.includes("redis-backed"))
+  check(`[${label}] queues page renders`, label === "redis" ? qText.includes("payments") : qText.includes("not available for this cluster"))
   check(`[${label}] queues no page errors`, errors.length === 0)
 
   // --- traces: seeded cascades + in-page waterfall panel ---
@@ -260,6 +260,22 @@ async function runVariant(label, clusterParam) {
     await page.keyboard.press("Escape")
     await page.waitForTimeout(400)
     check(`[${label}] Escape closes trace panel`, (await page.locator(".fixed.inset-0").count()) === 0)
+  }
+
+  // --- trace detail investigation controls ---------------------------------
+  if (label === "sqlite" && (await traceRow.count()) > 0) {
+    await goto("/traces")
+    const detailLink = page.locator('a[href^="#/traces/"]').first()
+    if ((await detailLink.count()) > 0) {
+      await detailLink.click()
+      await page.waitForTimeout(1400)
+      check(`[${label}] trace detail exposes investigation controls`, (await page.locator('input[aria-label="search spans"]').count()) === 1 && (await bodyText()).includes("Trace timeline"))
+      const spanButton = page.locator('button[aria-label*="active"], button[aria-label*="completed"], button[aria-label*="failed"]').first()
+      if ((await spanButton.count()) > 0) {
+        await spanButton.click()
+        check(`[${label}] trace detail selects a span`, (await bodyText()).includes("Selected span"))
+      }
+    }
   }
 
   // --- agent + mcp pages render ---
