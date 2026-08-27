@@ -766,12 +766,12 @@ export function PageHeader({
   children?: React.ReactNode
 }) {
   return (
-    <div className="mb-4 flex items-end justify-between gap-4">
-      <div>
+    <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+      <div className="min-w-0">
         <h1 className="text-lg font-semibold text-kumo-default">{title}</h1>
-        {subtitle && <p className="mt-0.5 text-[13px] text-kumo-subtle">{subtitle}</p>}
+        {subtitle && <p className="mt-0.5 max-w-prose text-[13px] text-kumo-subtle">{subtitle}</p>}
       </div>
-      <div className="flex items-center gap-2">{children}</div>
+      <div className="flex max-w-full flex-wrap items-center gap-2">{children}</div>
     </div>
   )
 }

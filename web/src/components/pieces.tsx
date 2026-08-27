@@ -125,6 +125,7 @@ export function DetailPanel({
   children: React.ReactNode
 }) {
   const panelRef = useDialogA11y(open)
+  const titleId = React.useId()
   if (!open) return null
   return (
     <div className="fixed inset-0 z-40 flex justify-end bg-black/40" onClick={onClose}>
@@ -132,12 +133,13 @@ export function DetailPanel({
         ref={panelRef}
         role="dialog"
         aria-modal="true"
+        aria-labelledby={titleId}
         tabIndex={-1}
         className="flex h-full w-full max-w-xl flex-col overflow-y-auto border-l border-kumo-line bg-kumo-base p-4 shadow-xl focus:outline-none"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold">{title}</h2>
+          <h2 id={titleId} className="min-w-0 text-sm font-semibold">{title}</h2>
           <Button variant="ghost" size="sm" onClick={onClose}>
             <X className="h-3.5 w-3.5" /> close
           </Button>

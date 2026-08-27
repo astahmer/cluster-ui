@@ -19,7 +19,7 @@ import { Badge, Button, Input, Select, Table, TBody, TD, TH, THead, TR, cn } fro
 import { Table as KumoTable } from "../kumo"
 import { fmtCountdown, fmtTime, relTime } from "../format.ts"
 import { ErrorNote, PageHeader, useEscToClose } from "../shell.tsx"
-import { triggerRefresh, useLive, usePauseWhile } from "../live.ts"
+import { triggerRefresh, useLive } from "../live.ts"
 import { Banner, CodeBlock, Empty, InputGroup, Tabs, Toolbar } from "../kumo"
 
 /* ------------------------------------------------------------------ config -- */
@@ -43,7 +43,8 @@ function datetimeLocalToMs(v: string): number | undefined {
 
 
 function copyJson(value: unknown) {
-  navigator.clipboard?.writeText(JSON.stringify(value, null, 2)).catch(() => {})
+  const text = typeof value === "string" ? value : JSON.stringify(value, null, 2)
+  navigator.clipboard?.writeText(text).then(() => toast.success("Copied to clipboard")).catch(() => toast.error("Could not copy to clipboard"))
 }
 
 export interface MessagesInitialFilters {
@@ -55,6 +56,35 @@ export interface MessagesInitialFilters {
   q?: string
   createdAfter?: string
   createdBefore?: string
+}
+
+function replaceMessageSearch(values: {
+  tab: string
+  entityType: string
+  entityId: string
+  q: string
+  createdAfter: string
+  createdBefore: string
+  openId: string | null
+}) {
+  const raw = window.location.hash.slice(1) || "/messages"
+  const qIndex = raw.indexOf("?")
+  const path = qIndex === -1 ? raw : raw.slice(0, qIndex)
+  const params = new URLSearchParams(qIndex === -1 ? "" : raw.slice(qIndex + 1))
+  const set = (key: string, value: string) => {
+    if (value) params.set(key, value)
+    else params.delete(key)
+  }
+  set("status", values.tab === "failed" ? "" : values.tab)
+  set("failed", values.tab === "failed" ? "true" : "")
+  set("entityType", values.entityType)
+  set("entityId", values.entityId)
+  set("q", values.q)
+  set("createdAfter", values.createdAfter)
+  set("createdBefore", values.createdBefore)
+  const nextPath = values.openId === null ? "/messages" : `/messages/${encodeURIComponent(values.openId)}`
+  const query = params.toString()
+  window.history.replaceState(null, "", `#${nextPath}${query ? `?${query}` : ""}`)
 }
 
 /* -------------------------------------------------------------------- page -- */
@@ -109,9 +139,6 @@ export function MessagesPage({
   const readonly = config?.readonly === true || config?.role === "viewer"
   const detailState = useMessageDetail(openId)
   useEscToClose(() => setOpenId(null))
-  // stop background polling while the detail panel is open so it doesn't rerender under the cursor
-  usePauseWhile(openId !== null)
-
   // keep URL-seeded filters in sync when the hash changes underneath us
   React.useEffect(() => {
     setEntityType(initialFilters?.entityType ?? "")
@@ -132,6 +159,10 @@ export function MessagesPage({
     initialFilters?.createdAfter,
     initialFilters?.createdBefore
   ])
+
+  React.useEffect(() => {
+    replaceMessageSearch({ tab, entityType, entityId, q, createdAfter, createdBefore, openId })
+  }, [createdAfter, createdBefore, entityId, entityType, openId, q, tab])
 
   React.useEffect(() => {
     const id = setTimeout(() => {
@@ -299,7 +330,7 @@ export function MessagesPage({
       </div>
 
       <Toolbar className="mb-3 flex-wrap">
-        <InputGroup className="w-56">
+        <InputGroup className="min-w-0 flex-1 sm:w-56 sm:flex-none">
           <InputGroup.Input
             aria-label="search messages"
             placeholder="search id / entity / tag — paste an id"
@@ -322,7 +353,7 @@ export function MessagesPage({
           )}
         </Button>
         {showFilters && (
-          <>
+          <div className="flex w-full flex-wrap items-center gap-2 rounded-md border border-kumo-line bg-kumo-canvas p-2 sm:w-auto sm:border-0 sm:bg-transparent sm:p-0">
             <Input
               aria-label="filter by entity type"
               placeholder="entity type"
@@ -367,7 +398,14 @@ export function MessagesPage({
                 className="w-44"
               />
             </label>
-          </>
+            <Button variant="ghost" size="sm" onClick={() => {
+              setEntityType("")
+              setEntityId("")
+              setCreatedAfter("")
+              setCreatedBefore("")
+              setPage(1)
+            }}>clear filters</Button>
+          </div>
         )}
         <Select
           value={String(pageSize)}
@@ -390,7 +428,7 @@ export function MessagesPage({
           </Select>
         )}
 
-        <span className="ml-auto flex items-center gap-1">
+        <span className="flex w-full flex-wrap items-center gap-1 sm:ml-auto sm:w-auto">
           <Button variant="ghost" size="sm" disabled={rows.length === 0} onClick={() => downloadJson(exportRows(), "messages.json")}>
             export page (json)
           </Button>
@@ -557,17 +595,20 @@ function MessageRow({
       <TD>
         <div className="flex items-center gap-1.5">
           {m.failed && (
-            <span title="failed execution" className="text-kumo-danger">
+            <span title="failed execution" className="text-kumo-danger" aria-label="failed execution">
               <XCircle weight="fill" className="h-3.5 w-3.5" />
             </span>
           )}
           <StatusBadge status={m.status} />
+          {m.failed && <Badge tone="err">failed</Badge>}
         </div>
       </TD>
       <TD>
         <div className="max-w-72 truncate">
           {m.entityType.startsWith("Workflow/") ? (
-            <span className="text-kumo-info">{m.entityType}</span>
+            <a href={`#/workflows/${encodeURIComponent(m.entityType.slice("Workflow/".length))}`} onClick={(e) => e.stopPropagation()} className="text-kumo-info hover:underline">
+              {m.entityType}
+            </a>
           ) : (
             m.entityType
           )}
@@ -598,6 +639,28 @@ function MessageRow({
               ↗ trace
             </a>
           )}
+          {!traceUrl && m.traceId && (
+            <a
+              href={`#/traces/${encodeURIComponent(m.traceId)}`}
+              title={`trace ${m.traceId}`}
+              onClick={(e) => e.stopPropagation()}
+              className="text-kumo-link hover:underline"
+            >
+              trace
+            </a>
+          )}
+          <button
+            type="button"
+            title="copy message id"
+            aria-label={`copy message ${m.id}`}
+            className="cursor-pointer rounded p-1.5 text-kumo-subtle hover:bg-kumo-tint hover:text-kumo-default"
+            onClick={(e) => {
+              e.stopPropagation()
+              copyJson(m.id)
+            }}
+          >
+            <Copy className="h-3.5 w-3.5" />
+          </button>
           <button
             type="button"
             title={config?.readonly ? "read-only mode" : "delete message"}
@@ -711,17 +774,27 @@ function MessageDetailBody({
     <div className="space-y-4 text-[13px]" data-testid="message-detail">
       {d.result && <OutcomeBanner result={d.result} />}
 
+      {m.failed && !d.result && (
+        <Banner
+          variant="error"
+          size="sm"
+          title="This message completed with a failure reply"
+          action={<Badge tone="err">failed</Badge>}
+        />
+      )}
+
       {clusterKind === "redis" && <JobFlowSection messageId={m.id} />}
 
       <section className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg border border-kumo-line bg-kumo-canvas/50 p-3">
-        <Field label="Status">
-          <div className="flex items-center gap-1.5">
+          <Field label="Status">
+            <div className="flex items-center gap-1.5">
             {m.failed && (
               <span className="text-kumo-danger">
                 <XCircle weight="fill" className="h-3.5 w-3.5" />
               </span>
             )}
-            <StatusBadge status={m.status} />
+              <StatusBadge status={m.status} />
+              {m.failed && <Badge tone="err">failed</Badge>}
           </div>
         </Field>
         <Field label="Kind">{m.kind}</Field>
@@ -742,10 +815,18 @@ function MessageDetailBody({
                 {m.traceId} ↗
               </a>
             ) : (
-              <code className="font-mono text-xs">{m.traceId}</code>
+              <a href={`#/traces/${encodeURIComponent(m.traceId)}`} className="font-mono text-xs text-kumo-link hover:underline">
+                {m.traceId} ↗
+              </a>
             )}
           </Field>
         )}
+      </section>
+
+      <section className="flex flex-wrap items-center gap-2 rounded-md border border-kumo-line bg-kumo-canvas/50 px-3 py-2 text-[11px]">
+        <span className="text-kumo-subtle">message id</span>
+        <code className="min-w-0 flex-1 truncate font-mono">{m.id}</code>
+        <Button variant="ghost" size="sm" onClick={() => copyJson(m.id)}><Copy className="h-3.5 w-3.5" /> copy</Button>
       </section>
 
       {(canRetry || canInterrupt || canResetActivity) && (
