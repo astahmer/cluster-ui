@@ -484,10 +484,10 @@ export function MessagesPage({
               <TH>Id</TH>
               <TH>Status</TH>
               <TH>Entity</TH>
-              <TH>Tag</TH>
-              <TH>Shard</TH>
-              <TH>Replies</TH>
-              <TH aria-sort={sort === "id" ? "descending" : "ascending"}>
+              <TH className="hidden sm:table-cell">Tag</TH>
+              <TH className="hidden sm:table-cell">Shard</TH>
+              <TH className="hidden sm:table-cell">Replies</TH>
+              <TH className="hidden sm:table-cell" aria-sort={sort === "id" ? "descending" : "ascending"}>
                 <button
                   type="button"
                   title="toggle server-side sort"
@@ -615,10 +615,10 @@ function MessageRow({
           <span className="text-kumo-subtle">/{m.entityId}</span>
         </div>
       </TD>
-      <TD>{m.tag ? <code className="text-xs">{m.tag}</code> : <span className="text-kumo-subtle">—</span>}</TD>
-      <TD className="tabular-nums text-kumo-subtle">{m.shardId}</TD>
-      <TD className="tabular-nums text-kumo-subtle">{m.replyCount || "—"}</TD>
-      <TD className="whitespace-nowrap text-kumo-subtle">
+      <TD className="hidden sm:table-cell">{m.tag ? <code className="text-xs">{m.tag}</code> : <span className="text-kumo-subtle">—</span>}</TD>
+      <TD className="hidden tabular-nums text-kumo-subtle sm:table-cell">{m.shardId}</TD>
+      <TD className="hidden tabular-nums text-kumo-subtle sm:table-cell">{m.replyCount || "—"}</TD>
+      <TD className="hidden whitespace-nowrap text-kumo-subtle sm:table-cell">
         {scheduledView && m.deliverAt !== null ? (
           <span title={fmtTime(m.deliverAt)}>{fmtCountdown(m.deliverAt)}</span>
         ) : (

@@ -160,11 +160,9 @@ export function QueuesPage() {
 
       {queues.length === 0 && storageKind !== "redis" && (
         <p className="mt-2 flex items-center gap-1 text-[12px] text-kumo-subtle">
-          redis clusters expose queue pause/resume here; sqlite clusters manage delivery through the
-          cluster itself.
-          <Tooltip content="CLUSTER_UI_CLUSTERS=name=redis://127.0.0.1:6399">
-            <span className="cursor-help underline underline-offset-2">how?</span>
-          </Tooltip>
+          Redis clusters expose queue pause/resume here; this cluster manages delivery through its
+          storage directly.
+          {storageKind === null && <Tooltip content="CLUSTER_UI_CLUSTERS=name=redis://127.0.0.1:6399"><span className="cursor-help underline underline-offset-2">configure Redis?</span></Tooltip>}
         </p>
       )}
 

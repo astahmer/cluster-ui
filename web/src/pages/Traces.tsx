@@ -222,7 +222,10 @@ export function TracesPage({
 export function TraceDetailPage({ traceId }: { traceId: string }) {
   return (
     <div>
-      <PageHeader title={`Trace ${shortId(traceId)}`} subtitle="span waterfall, oldest first">
+      <PageHeader title={`Trace ${shortId(traceId)}`} subtitle="execution timeline — oldest first">
+        <button type="button" className="inline-flex items-center gap-1 text-[12px] text-kumo-subtle hover:text-kumo-default" onClick={() => copyText(traceId)}>
+          <Copy className="h-3 w-3" /> copy trace id
+        </button>
         <a href="#/traces" className="text-[13px] text-kumo-subtle hover:text-kumo-default">
           ← all traces
         </a>
