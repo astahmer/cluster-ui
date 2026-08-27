@@ -107,10 +107,10 @@ export function SpanWaterfall({
 
   return (
     <div className="overflow-x-auto rounded-md border border-kumo-line">
-      <div className="min-w-[520px]">
+      <div className="min-w-[680px]">
         {/* shared time axis */}
         <div className="relative border-b border-kumo-line bg-kumo-recessed px-3 py-1.5">
-          <div className="relative ml-[208px] h-4">
+          <div className="relative ml-[288px] h-4">
             {ticks.map((t) => {
               const isFirst = t === t0
               const isLast = t === t1
@@ -169,7 +169,7 @@ export function SpanWaterfall({
                   aria-pressed={selected}
                   onClick={() => onSelect?.(s)}
                 >
-                  <span className="flex w-[196px] shrink-0 items-center gap-1.5 truncate text-right text-[11px] text-kumo-subtle">
+                  <span className="flex w-[276px] shrink-0 items-center gap-1.5 truncate pr-1 text-right text-[11px] text-kumo-subtle">
                     <span className="truncate">{s.label}</span>
                     {s.badge}
                   </span>

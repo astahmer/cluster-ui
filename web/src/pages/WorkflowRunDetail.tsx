@@ -50,6 +50,7 @@ export function WorkflowRunPage({
   const [busy, setBusy] = React.useState(false)
   const [timelineOpen, setTimelineOpen] = React.useState(true)
   const [view, setView] = React.useState<"timeline" | "graph">("timeline")
+  const [selectedSpanKey, setSelectedSpanKey] = React.useState<string | null>(null)
   const appConfig = useAppConfig()
   const readonly = appConfig?.readonly === true || appConfig?.role === "viewer"
 
@@ -90,7 +91,10 @@ export function WorkflowRunPage({
         endMs: activities.length > 0 ? activities[activities.length - 1].createdAt : run.createdAt,
         tone:
           run.status === "done" ? (result?.outcome === "Failure" ? "danger" : "success") : "warning",
-        badge: result?.outcome === "Failure" ? <Badge tone="err">failed</Badge> : undefined
+        badge: result?.outcome === "Failure" ? <Badge tone="err">failed</Badge> : undefined,
+        detail: `workflow ${executionId} · ${run.status}${result?.outcome === "Failure" ? " · failed" : ""}`,
+        searchText: `workflow ${executionId} run ${run.id}`,
+        durationSource: "inferred"
       }
     ]
     activities.forEach((a, i) => {
@@ -102,10 +106,13 @@ export function WorkflowRunPage({
         startMs: a.createdAt,
         endMs: next ? next.createdAt : a.createdAt,
         tone: a.failed ? "danger" : a.status === "done" ? "success" : "warning",
-        badge:
+          badge:
           typeof a.attempt === "number" && a.attempt > 1 ? (
             <Badge tone="warn">attempt {a.attempt}</Badge>
-          ) : undefined
+          ) : undefined,
+        detail: `${a.activityName ?? a.tag ?? a.kind} · ${a.status}${a.failed ? " · failed" : ""}${typeof a.attempt === "number" ? ` · attempt ${a.attempt}` : ""}`,
+        searchText: `${a.activityName ?? ""} ${a.tag ?? ""} ${a.kind} ${a.status}`,
+        durationSource: "inferred"
       })
     })
     return spans
@@ -145,8 +152,7 @@ export function WorkflowRunPage({
   }, [run, (data?.activities ?? []) as ActivityRow[], executionId, result])
 
 
-  const reload = React.useRef<() => void>(() => {})
-  reload.current = () => {
+  const reload = React.useCallback(() => {
     api
       .workflowRun(name, executionId)
       .then((d) => {
@@ -154,10 +160,10 @@ export function WorkflowRunPage({
         setError(null)
       })
       .catch((e) => setError(String(e)))
-  }
+  }, [executionId, name])
   React.useEffect(() => {
-    reload.current()
-  }, [name, executionId])
+    void reload()
+  }, [reload])
 
 
   const resetActivityFromHere = async (activity: ActivityRow) => {
@@ -175,7 +181,7 @@ export function WorkflowRunPage({
       toast.success("Activity reset")
       triggerRefresh()
       onChanged?.()
-      setTimeout(() => reload.current(), 250)
+      setTimeout(() => void reload(), 250)
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       setActionError(msg)
@@ -211,7 +217,7 @@ export function WorkflowRunPage({
       triggerRefresh()
       onChanged?.()
       // give the write a beat to land before refetching
-      setTimeout(() => reload.current(), 250)
+      setTimeout(() => void reload(), 250)
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       setActionError(msg)
@@ -229,7 +235,7 @@ export function WorkflowRunPage({
           <span>{error}</span>
           <button
             type="button"
-            onClick={() => reload.current()}
+            onClick={() => void reload()}
             className="shrink-0 cursor-pointer rounded-md border border-kumo-danger/40 px-2 py-0.5 text-[12px] font-medium hover:bg-kumo-danger-tint"
           >
             Retry
@@ -303,7 +309,21 @@ export function WorkflowRunPage({
           </CardHeader>
           {timelineOpen && (
             <CardContent>
-              {view === "graph" ? <FlowGraph specs={flowSpecs} /> : <SpanWaterfall spans={timelineSpans} />}
+              {view === "graph" ? <FlowGraph specs={flowSpecs} /> : <SpanWaterfall spans={timelineSpans} selectedKey={selectedSpanKey} onSelect={(span) => setSelectedSpanKey(span.key)} />}
+              {view === "timeline" && selectedSpanKey && (() => {
+                const selected = timelineSpans.find((span) => span.key === selectedSpanKey)
+                if (!selected) return null
+                return (
+                  <div className="mt-3 rounded-md border border-kumo-brand/40 bg-kumo-canvas p-3 text-[11px]">
+                    <div className="flex items-start justify-between gap-3">
+                      <div><div className="font-semibold uppercase tracking-wide text-kumo-subtle">Selected activity</div><div className="mt-1 font-medium">{selected.detail ?? "span"}</div></div>
+                      <button type="button" className="text-kumo-subtle underline" onClick={() => setSelectedSpanKey(null)}>clear</button>
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-4 text-kumo-subtle"><span>started {fmtTime(selected.startMs)}</span><span>duration {formatDuration(selected.endMs - selected.startMs)}</span><span>{selected.durationSource === "recorded" ? "recorded" : "inferred"} timing</span></div>
+                    <a href={`#/messages/${encodeURIComponent(selected.key.replace(/^run-/, ""))}`} className="mt-2 inline-block text-kumo-link hover:underline">open message detail ↗</a>
+                  </div>
+                )
+              })()}
             </CardContent>
           )}
         </Card>
@@ -318,7 +338,7 @@ export function WorkflowRunPage({
         </Field>
         <Field label="Started">{fmtTime(run.createdAt)}</Field>
         <Field label="Run message">
-          <span className="font-mono text-xs text-kumo-subtle">{run.id}</span>
+          <a href={`#/messages/${encodeURIComponent(run.id)}`} className="font-mono text-xs text-kumo-link hover:underline">{run.id} ↗</a>
         </Field>
       </section>
 
@@ -462,4 +482,11 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <span className="truncate">{children}</span>
     </div>
   )
+}
+
+function formatDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return "—"
+  if (ms < 1000) return `${Math.round(ms)}ms`
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`
+  return `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`
 }

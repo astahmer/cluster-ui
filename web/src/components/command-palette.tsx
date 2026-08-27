@@ -118,8 +118,8 @@ export function CommandPalette({
     if (open) {
       setQuery("")
       setIndex(0)
-      // focus after the dialog mounts
-      setTimeout(() => inputRef.current?.focus(), 30)
+      const focusTimer = setTimeout(() => inputRef.current?.focus(), 30)
+      return () => clearTimeout(focusTimer)
     } else {
       setAsyncItems([])
     }
@@ -191,7 +191,6 @@ export function CommandPalette({
           {/* eslint-disable-next-line jsx-a11y/no-autofocus */}
           <input
             ref={inputRef}
-            autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onKey}
@@ -200,7 +199,7 @@ export function CommandPalette({
             role="combobox"
             aria-expanded="true"
             aria-controls="command-palette-listbox"
-            aria-activedescendant={`palette-option-${index}`}
+            aria-activedescendant={filtered[index] ? `palette-option-${index}` : undefined}
             className="w-full bg-transparent text-sm outline-none placeholder:text-kumo-subtle"
           />
           <kbd className="rounded border border-kumo-line px-1 text-[10px] text-kumo-subtle">esc</kbd>

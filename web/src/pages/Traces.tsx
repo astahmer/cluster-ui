@@ -445,12 +445,14 @@ function toSpans(rows: ReadonlyArray<Message>): TimelineSpan[] {
     const endMs =
       durMs !== null ? m.createdAt + durMs : next ? Math.max(next.createdAt, m.createdAt + 1) : m.createdAt + Math.max(totalHint(sorted), 250)
     const label = m.tag || m.entityType
+    const entityLabel = m.entityId.length > 18 ? `${m.entityId.slice(0, 8)}…${m.entityId.slice(-6)}` : m.entityId
     return {
       key: m.id,
       label: (
         <>
           <span className="font-medium">{label}</span>
-          {m.tag && m.entityType && <span className="text-kumo-subtle"> · {m.entityType}</span>}
+          {m.entityType && <span className="text-kumo-subtle"> · {m.entityType}</span>}
+          {m.entityId && <span className="text-[10px] text-kumo-subtle"> · {entityLabel}</span>}
         </>
       ),
       group: m.entityType,

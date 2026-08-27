@@ -6,7 +6,6 @@ import { relTime } from "../format.ts"
 import { FilterBar, presenceFacet, useFacets, type FacetDef } from "../components/filters/index.tsx"
 import { Badge, Card, CardContent, Select, Table, TBody, TD, TH, THead, TR } from "../components/ui.tsx"
 import { ErrorNote, PageHeader, useLive } from "../shell.tsx"
-import { usePauseWhile } from "../live.ts"
 import { StatusBadge } from "../components/pieces.tsx"
 import { Empty } from "../kumo"
 import { WorkflowRunPage } from "./WorkflowRunDetail.tsx"
@@ -140,7 +139,6 @@ export function WorkflowRunsPage({
     setRuns((await api.workflowRuns(name)) as RunRow[])
   )
   // stop background polling while the run-detail panel is open so it doesn't rerender under the cursor
-  usePauseWhile(openExecution !== null)
   const sort = useSort<RunRow>()
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
