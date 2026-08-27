@@ -35,6 +35,13 @@ export function RunnersPage() {
         subtitle="registered cluster nodes and their shard load"
       />
       <ErrorNote error={error} onRetry={refresh} />
+      {rows.length > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 text-[12px] text-kumo-subtle">
+          <Badge tone={staleCount > 0 ? "warn" : "ok"}>{rows.length - staleCount}/{rows.length} assigned/active</Badge>
+          <Badge tone="info">{totalShards} shard{totalShards === 1 ? "" : "s"}</Badge>
+          {staleCount > 0 && <Badge tone="warn">{staleCount} no shard assignment</Badge>}
+        </div>
+      )}
       <FilterBar defs={facetDefs} rows={rows} facets={facets} />
       <div className="rounded-lg border border-kumo-line bg-kumo-base">
         <Table>
@@ -69,10 +76,8 @@ export function RunnersPage() {
                 <TD className="tabular-nums text-kumo-subtle">v{r.version ?? "?"}</TD>
                 <TD className="text-right tabular-nums">{r.shards}</TD>
                 <TD>
-                  {/* single staleness treatment (UX audit #2): the address cell used
-                      to ALSO show a "stale" badge while this column said "no shards" */}
                   {r.stale ?
-                    <Badge tone="warn">stale</Badge> :
+                    <Badge tone="warn">no shard assignment</Badge> :
                     <Badge tone="ok">active</Badge>}
                 </TD>
                 <TD>
@@ -92,8 +97,8 @@ export function RunnersPage() {
       </div>
       <p className="mt-2 flex items-center gap-1.5 text-[12px] text-kumo-subtle">
         <span className="mr-1 inline-block h-2 w-2 rounded-full bg-kumo-warning align-middle" />
-        stale = registered in shard storage but currently owning zero shards — the
-        runner is likely shut down or draining{staleCount > 0 ? ` (${staleCount} detected)` : ""}.
+        no shard assignment means the runner is registered but currently owns zero shards;
+        this does not prove that its process is unhealthy. Check Runtime for reporter health.
       </p>
     </div>
   )

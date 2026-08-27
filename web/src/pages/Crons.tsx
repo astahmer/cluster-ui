@@ -125,7 +125,11 @@ export function CronsPage() {
             <TBody>
               {sort.sorted(visible).map((c) => (
                 <TR key={c.entityType} className={overdue(c) ? "bg-kumo-danger-tint/50" : undefined}>
-                  <TD className="font-medium">{c.name}</TD>
+                  <TD className="font-medium">
+                    <a href={`#/messages?entityType=${encodeURIComponent(c.entityType)}`} className="hover:text-kumo-link hover:underline">
+                      {c.name}
+                    </a>
+                  </TD>
                   <TD className="whitespace-nowrap text-kumo-subtle" title={fmtTime(c.lastRunAt)}>
                     {relTime(c.lastRunAt)}
                   </TD>

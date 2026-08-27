@@ -102,21 +102,25 @@ export function ShardsPage() {
           {buckets.map((bucket) => {
             const first = bucket[0]
             const last = bucket[bucket.length - 1]
+            const bucketRunners = [...new Set(bucket.map((shard) => shard.address).filter((address): address is string => address !== null))]
             const rangeLabel =
               bucketSize > 1 ? `shards ${first.shardId}–${last.shardId}` : `shard ${first.shardId}`
+            const mixed = bucketRunners.length > 1
             return (
               <div
                 key={first.shardId}
-                title={`${rangeLabel} → ${first.address ?? "UNASSIGNED"}${bucketSize > 1 ? " (cell shows first shard's runner; bucket may mix runners)" : ""}`}
+                title={`${rangeLabel} → ${first.address ?? "UNASSIGNED"}${mixed ? ` (${bucketRunners.length} runners in this bucket)` : ""}`}
                 aria-label={
                   bucketSize > 1
-                    ? `${rangeLabel}, first assigned to ${first.address ?? "nobody"}`
+                    ? `${rangeLabel}, ${mixed ? `${bucketRunners.length} runners` : `assigned to ${first.address ?? "nobody"}`}`
                     : `shard ${first.shardId} ${first.address ? `assigned to ${first.address}` : "unassigned"}`
                 }
                 className="aspect-square cursor-help rounded-[3px]"
                 style={
                   first.address
-                    ? { background: runnerHue(first.address), opacity: 0.85 }
+                    ? mixed
+                      ? { background: `linear-gradient(90deg, ${bucketRunners.map((address) => runnerHue(address)).join(", ")})`, opacity: 0.85 }
+                      : { background: runnerHue(first.address), opacity: 0.85 }
                     : { background: "color-mix(in oklab, var(--color-kumo-warning) 12%, transparent)", boxShadow: "inset 0 0 0 1px color-mix(in oklab, var(--color-kumo-warning) 50%, transparent)" }
                 }
               />

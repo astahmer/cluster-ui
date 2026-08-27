@@ -2,7 +2,7 @@ import * as React from "react"
 import { QueueIcon } from "@phosphor-icons/react"
 import { api, type QueueInfo, type QueueJob, type QueueJobState } from "../api.ts"
 import { Badge, Table, TBody, TD, TH, THead, TR } from "../components/ui.tsx"
-import { ErrorNote, PageHeader, useLive } from "../shell.tsx"
+import { ErrorNote, PageHeader, useCluster, useLive } from "../shell.tsx"
 import { Empty, Tooltip, Dialog, DialogTitle, DialogDescription } from "../kumo"
 import { JsonBlock, SkeletonTable } from "../components/pieces.tsx"
 import { Button, Input, Select } from "../components/ui.tsx"
@@ -22,7 +22,9 @@ export function QueuesPage() {
   const [cleanFor, setCleanFor] = React.useState<QueueInfo | null>(null)
   const [browseQueue, setBrowseQueue] = React.useState<string | null>(null)
   const config = useAppConfig()
+  const cluster = useCluster()
   const readonly = config?.readonly === true || config?.role === "viewer"
+  const storageKind = config?.clusterKinds?.find((profile) => profile.name === cluster)?.kind ?? (config?.clusterKinds?.length === 1 ? config.clusterKinds[0].kind : null)
 
   if (loading && queues.length === 0) return <SkeletonTable />
 
@@ -54,7 +56,7 @@ export function QueuesPage() {
     <div>
       <PageHeader
         title="Queues"
-        subtitle="redis queue intake — pause stops workers from taking new jobs; clean removes finished jobs"
+        subtitle={storageKind === "redis" ? "Redis queue intake — pause stops workers from taking new jobs; clean removes finished jobs" : "Queue capabilities for the selected cluster"}
       />
       <ErrorNote error={error} onRetry={refresh} />
 
@@ -142,8 +144,8 @@ export function QueuesPage() {
         {queues.length === 0 && (
           <Empty
             icon={<QueueIcon className="h-8 w-8 text-kumo-subtle" />}
-            title="No queues — this cluster isn't redis-backed"
-            description="Queue controls apply to BullMQ clusters. Add one via CLUSTER_UI_CLUSTERS=name=redis://host:6399."
+            title={storageKind === "redis" ? "No queues found" : "Queues are not available for this cluster"}
+            description={storageKind === "redis" ? "Redis is connected, but it has not reported any BullMQ queues yet." : "Queue controls apply to Redis/BullMQ clusters. This cluster uses delivery storage directly instead of named queues."}
           />
         )}
       </div>
@@ -156,7 +158,7 @@ export function QueuesPage() {
         />
       )}
 
-      {queues.length === 0 && (
+      {queues.length === 0 && storageKind !== "redis" && (
         <p className="mt-2 flex items-center gap-1 text-[12px] text-kumo-subtle">
           redis clusters expose queue pause/resume here; sqlite clusters manage delivery through the
           cluster itself.

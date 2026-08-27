@@ -62,6 +62,11 @@ export function SingletonsPage() {
         </Badge>
         <Badge tone="accent">{totalSingletons} singletons</Badge>
       </div>
+      {runners.length > 0 && reporting.length === 0 && (
+        <div className="mb-3 rounded-md border border-kumo-warning/40 bg-kumo-warning-tint px-3 py-2 text-[12px] text-kumo-warning">
+          <strong>No runtime reporters are connected.</strong> Runner storage is visible, but in-memory singleton and fiber state is not. Install <code>@effect/cluster-ui-reporter</code> in each runner, then retry.
+        </div>
+      )}
 
       <div data-tab="state" hidden={tab !== "state"} className="rounded-lg border border-kumo-line bg-kumo-base">
         <Table>
@@ -138,7 +143,7 @@ function ReporterMissing({ reason }: { reason?: string }) {
         </span>
       }
     >
-      <span className="cursor-help text-[12px] text-kumo-subtle">reporter not reachable</span>
+      <span className="cursor-help text-[12px] text-kumo-warning">not reporting</span>
     </Tooltip>
   )
 }
