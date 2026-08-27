@@ -22,19 +22,40 @@ pnpm start       # serves UI + API on http://localhost:8787
 
 ## Point it at a real cluster
 
-The server needs read access to the SQLite database used by the cluster's
-`SqlShardStorage` / `SqlMessageStorage`.
+The server needs read access to the storage used by the cluster's
+`SqlShardStorage` / `SqlMessageStorage`. SQLite files and PostgreSQL URLs are
+supported; PostgreSQL is useful when the cluster runs in the same database as
+your application.
 
-| Env var               | Default              | Meaning                                   |
-| --------------------- | -------------------- | ----------------------------------------- |
-| `CLUSTER_UI_DB`       | `./data/cluster.db`  | path to the sqlite file                   |
-| `CLUSTER_UI_PREFIX`   | `cluster`            | table prefix used by the storages         |
-| `PORT`                | `8787`               | http port                                 |
-| `HOST`                | `0.0.0.0`            | bind address                              |
-| `CLUSTER_UI_READONLY` | unset                | `1` opens sqlite in read-only mode        |
+| Env var               | Default             | Meaning                                                                                            |
+| --------------------- | ------------------- | -------------------------------------------------------------------------------------------------- |
+| `CLUSTER_UI_DB`       | `./data/cluster.db` | path to the sqlite file                                                                            |
+| `CLUSTER_UI_PREFIX`   | `cluster`           | table prefix used by the storages                                                                  |
+| `CLUSTER_UI_CLUSTERS` | unset               | comma-separated `name=spec` registry; `spec` may be a SQLite path, `postgres://` URL, or Redis URL |
+| `PORT`                | `8787`              | http port                                                                                          |
+| `HOST`                | `0.0.0.0`           | bind address                                                                                       |
+| `CLUSTER_UI_READONLY` | unset               | `1` enables read-only mode                                                                          |
 
-> Postgres support: the schema is identical across dialects; adding
-> `@effect/sql-pg`-backed queries is straightforward follow-up work.
+PostgreSQL support uses the native client adapter and is read-only in the
+dashboard: write actions are disabled for these profiles. The adapter tolerates
+Effect Cluster database versions that do not have a persisted `cluster_shards`
+table and reports shard assignments as empty in that case.
+
+### TL;DR: start cluster-ui from any repo
+
+For a local Effect Cluster, run these commands from any directory:
+
+```sh
+cd ~/dev/cluster-ui
+CLUSTER_UI_CLUSTERS='my-app=postgres://user:password@127.0.0.1:5438/db_dev' \
+CLUSTER_UI_READONLY=1 pnpm dev
+```
+
+Open <http://localhost:5173>. This starts the Vite UI on `5173`, proxies its
+API to cluster-ui on `8787`, and reads the My-app `db_dev` cluster tables on
+PostgreSQL `5438`. Keep the terminal open; press `Ctrl-C` to stop both
+processes. For a built single-process server, use `pnpm build` once and then
+replace `pnpm dev` with `pnpm start` and open <http://localhost:8787>.
 
 ## Development
 
@@ -43,7 +64,8 @@ pnpm dev:server   # API only, node --watch on :8787 (native TS, no tsx)
 pnpm dev:web      # vite dev server (proxies /api to :8787)
 ```
 
-Docs: [`docs/ROADMAP.md`](docs/ROADMAP.md) (feature roadmap),
+Docs: [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) (production deployment and
+operations), [`docs/ROADMAP.md`](docs/ROADMAP.md) (feature roadmap),
 [`docs/UX-REVIEW.md`](docs/UX-REVIEW.md) (UX audit #1, all items fixed),
 [`docs/UX-AUDIT-2.md`](docs/UX-AUDIT-2.md) (fresh audit #2, 2026-08-26), and
 [`docs/COMPETITIVE.md`](docs/COMPETITIVE.md) (competitor landscape + feature gaps).
