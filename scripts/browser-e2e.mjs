@@ -188,6 +188,15 @@ async function runVariant(label, clusterParam) {
       clientWidth: element.clientWidth,
       scrollWidth: element.scrollWidth
     }))
+    const fullscreenButton = page.getByRole("button", { name: "Open detail panel fullscreen" })
+    if ((await fullscreenButton.count()) > 0) {
+      await fullscreenButton.click()
+      const fullscreenWidth = await messagePanel.evaluate((element) => element.clientWidth)
+      check("[" + label + "] detail panel enters fullscreen", fullscreenWidth >= 1400)
+      await page.getByRole("button", { name: "Exit fullscreen detail panel" }).click()
+    } else {
+      check("[" + label + "] detail panel fullscreen control present", false)
+    }
     check("[" + label + "] message detail stays within panel width", messagePanelWidth.scrollWidth <= messagePanelWidth.clientWidth + 1)
     check(`[${label}] message detail opens without crash`, errors.length === 0)
     if (errors.length > 0) console.log("   ", errors.slice(0, 3))
@@ -198,6 +207,11 @@ async function runVariant(label, clusterParam) {
     check(`[${label}] message detail hydrates from URL`, (await page.locator(".fixed.inset-0").count()) > 0)
     await page.keyboard.press("Escape")
     await page.waitForTimeout(400)
+    await goto("/messages?page=2&pageSize=25&sort=deliverAt", 1200)
+    check(`[${label}] message table state is URL-persisted`, (await page.locator('select[aria-label="page size"]').inputValue()) === "25" && (await page.evaluate(() => window.location.hash)).includes("sort=deliverAt"))
+    await page.setViewportSize({ width: 390, height: 844 })
+    check(`[${label}] mobile message table avoids page overflow`, await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1))
+    await page.setViewportSize({ width: 1440, height: 900 })
   } else {
     check(`[${label}] messages rows present`, false)
   }
@@ -223,6 +237,7 @@ async function runVariant(label, clusterParam) {
       const runHash = await page.evaluate(() => window.location.hash)
       check(`[${label}] workflow-run deep-link hash`, /^#\/workflows\/[^/]+\//.test(runHash))
       await goto(runHash.slice(1), 1800)
+      check("[" + label + "] workflow run shows breadcrumbs", (await page.getByRole("navigation", { name: "Breadcrumb" }).count()) === 1)
       const workflowMessageLink = page.locator('.fixed.inset-0 a[href^="#/messages/"]').first()
       if ((await workflowMessageLink.count()) > 0) {
         await workflowMessageLink.click()
@@ -289,6 +304,17 @@ async function runVariant(label, clusterParam) {
     if ((await detailLink.count()) > 0) {
       await detailLink.click()
       await page.waitForTimeout(1400)
+      check("[" + label + "] trace waterfall has virtual viewport", (await page.locator('[data-testid="timeline-viewport"]').count()) === 1)
+      const zoomIn = page.getByRole("button", { name: "Zoom in timeline" }).first()
+      if ((await zoomIn.count()) > 0) {
+        await zoomIn.click()
+        check("[" + label + "] trace timeline zoom control works", (await bodyText()).includes("150%"))
+      }
+      const groupSelect = page.getByRole("combobox", { name: "group spans by" })
+      if ((await groupSelect.count()) > 0) {
+        await groupSelect.selectOption("status")
+        check("[" + label + "] trace grouping control works", (await groupSelect.inputValue()) === "status")
+      }
       check(`[${label}] trace detail exposes investigation controls`, (await page.locator('input[aria-label="search spans"]').count()) === 1 && (await bodyText()).includes("Trace timeline"))
       const spanButton = page.locator('button[aria-label*="active"], button[aria-label*="completed"], button[aria-label*="failed"]').first()
       if ((await spanButton.count()) > 0) {
