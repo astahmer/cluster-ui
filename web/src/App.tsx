@@ -40,11 +40,15 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   const [required, setRequired] = React.useState(false)
   const [token, setTokenValue] = React.useState("")
   const [error, setError] = React.useState<string | null>(null)
+  const tokenInputRef = React.useRef<HTMLInputElement | null>(null)
   React.useEffect(() => {
     const show = () => setRequired(true)
     window.addEventListener(AUTH_REQUIRED_EVENT, show)
     return () => window.removeEventListener(AUTH_REQUIRED_EVENT, show)
   }, [])
+  React.useEffect(() => {
+    if (required) tokenInputRef.current?.focus()
+  }, [required])
   if (!required) return <>{children}</>
   const submit = async (event: React.FormEvent) => {
     event.preventDefault()
@@ -61,7 +65,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     <main className="grid min-h-screen place-items-center bg-kumo-canvas p-4 text-kumo-default">
       <form onSubmit={(event) => void submit(event)} className="w-full max-w-sm space-y-4 rounded-lg border border-kumo-line bg-kumo-base p-6 shadow-sm">
         <div><h1 className="text-lg font-semibold">Sign in to cluster-ui</h1><p className="mt-1 text-[13px] text-kumo-subtle">Enter the deployment token to continue.</p></div>
-        <input autoFocus type="password" value={token} onChange={(event) => setTokenValue(event.target.value)} className="w-full rounded-md border border-kumo-line bg-kumo-base px-3 py-2 text-sm" aria-label="deployment token" />
+        <input ref={tokenInputRef} type="password" value={token} onChange={(event) => setTokenValue(event.target.value)} className="w-full rounded-md border border-kumo-line bg-kumo-base px-3 py-2 text-sm" aria-label="deployment token" />
         {error && <p className="text-[13px] text-kumo-danger">{error}</p>}
         <button type="submit" disabled={!token} className="w-full rounded-md bg-kumo-brand px-3 py-2 text-sm font-medium text-white disabled:opacity-50">Sign in</button>
       </form>

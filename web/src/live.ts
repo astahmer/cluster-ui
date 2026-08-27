@@ -197,7 +197,9 @@ export function useLive(fetcher: () => Promise<unknown>, deps: unknown[] = [], e
   const [tick, setTick] = React.useState(0)
 
   const fetchRef = React.useRef(fetcher)
-  fetchRef.current = fetcher
+  React.useEffect(() => {
+    fetchRef.current = fetcher
+  }, [fetcher])
 
   React.useEffect(() => {
     if (!enabled) return

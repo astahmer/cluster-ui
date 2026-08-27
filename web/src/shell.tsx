@@ -106,16 +106,14 @@ export const usePolling = live.useLive
  */
 const escStack: Array<() => void> = []
 export function useEscToClose(handler: () => void) {
-  const ref = React.useRef(handler)
-  ref.current = handler
   React.useEffect(() => {
-    const fn = () => ref.current()
+    const fn = () => handler()
     escStack.push(fn)
     return () => {
       const i = escStack.indexOf(fn)
       if (i >= 0) escStack.splice(i, 1)
     }
-  }, [])
+  }, [handler])
 }
 
 /* --------------------------------- theming -------------------------------- */

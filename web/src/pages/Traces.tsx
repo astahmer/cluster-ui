@@ -249,7 +249,9 @@ function TraceDetailBody({ traceId, compact }: { traceId: string; compact?: bool
     }
   }, [traceId], streamState !== "live")
   const refreshRef = React.useRef(refresh)
-  refreshRef.current = refresh
+  React.useEffect(() => {
+    refreshRef.current = refresh
+  }, [refresh])
 
   React.useEffect(() => {
     if (typeof EventSource === "undefined") {

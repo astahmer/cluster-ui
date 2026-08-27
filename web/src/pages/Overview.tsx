@@ -20,25 +20,19 @@ export function OverviewPage() {
   const [rangeMs, setRangeMs] = React.useState(RANGES[0].ms)
   const [brushRange, setBrushRange] = React.useState<SparklineBrushRange | null>(null)
 
-  const loadOverview = React.useRef(async () => setData(await api.overview()))
-  const loadHistoryRef = React.useRef<(ms: number) => Promise<void>>(async (ms: number) => {
+  const loadOverview = React.useCallback(async () => setData(await api.overview()), [])
+  const loadHistory = React.useCallback(async () => {
     try {
-      const points = await api.metricsHistory({ rangeMs: ms })
+      const points = await api.metricsHistory({ rangeMs })
       // tolerate older servers / mocks returning a non-array
       setHistory(Array.isArray(points) ? points : [])
     } catch {
       // sampler may not be running (older server) — sparklines just stay empty
     }
-  })
-  const rangeRef = React.useRef(rangeMs)
-  rangeRef.current = rangeMs
-  const loadHistory = React.useRef(async () => loadHistoryRef.current(rangeRef.current))
-
-  const overviewLive = useLive(() => loadOverview.current())
-  useLive(() => loadHistory.current())
-  React.useEffect(() => {
-    void loadHistoryRef.current(rangeMs)
   }, [rangeMs])
+
+  const overviewLive = useLive(loadOverview)
+  useLive(loadHistory, [rangeMs])
 
   if (overviewLive.loading && !data)
     return (
