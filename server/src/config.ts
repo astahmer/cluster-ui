@@ -2,8 +2,8 @@
 export interface ClusterProfile {
   /** display name used in the UI switcher and `?cluster=` param */
   readonly name: string
-  /** "sqlite" (default) or "redis" — redis entries point at BullMQ queues */
-  readonly kind: "sqlite" | "redis"
+  /** "sqlite" (default), "postgres", or "redis" — redis entries point at BullMQ queues */
+  readonly kind: "sqlite" | "postgres" | "redis"
   /** SQLite database file (sqlite clusters) */
   readonly dbFile: string
   /** redis connection url (redis clusters) */
@@ -42,8 +42,10 @@ export function parseClusters(
       // "path:prefix" only counts as a split when the part after ":" has no path separator
       // redis URLs carry a port — never treat "host:port" as path:prefix
       const isRedis = rest.startsWith("redis://") || rest.startsWith("rediss://")
+      const isPostgres = rest.startsWith("postgres://") || rest.startsWith("postgresql://")
       const looksLikePrefix =
         !isRedis &&
+        !isPostgres &&
         colon !== -1 &&
         !rest.slice(colon + 1).includes("/") &&
         rest.slice(colon + 1).length > 0
@@ -51,9 +53,9 @@ export function parseClusters(
       const prefix = looksLikePrefix ? rest.slice(colon + 1) : process.env.CLUSTER_UI_PREFIX ?? "cluster"
       return {
         name: name || "default",
-        kind: isRedis ? "redis" : "sqlite",
-        dbFile: isRedis ? "" : target,
-        url: isRedis ? target : "",
+        kind: isRedis ? "redis" : isPostgres ? "postgres" : "sqlite",
+        dbFile: isRedis || isPostgres ? "" : target,
+        url: isRedis || isPostgres ? target : "",
         prefix: isRedis ? "cluster" : prefix
       }
     })

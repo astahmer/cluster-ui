@@ -12,6 +12,7 @@ import { agentTools, callAgentTool } from "./agent-tools.ts"
 import { handleMcpRequest } from "./mcp.ts"
 import { config } from "./config.ts"
 import { makeRedisRepo } from "./redis-repo.ts"
+import { makePostgresRepo } from "./postgres-repo.ts"
 import { queryRunnerFibers, queryRunnerLogs } from "./singletons.ts"
 import { makeRepo, openDb, type MessageQuery, type Repo } from "./queries.ts"
 import { queryRunnerState } from "./singletons.ts"
@@ -21,7 +22,11 @@ import { actor, alertCluster, createAlert, deleteAlert, listAlerts, listAudit, r
 const repos = new Map<string, Repo>(
   config.clusters.map((c) => [
     c.name,
-    c.kind === "redis" ? makeRedisRepo(c.url) : makeRepo(openDb(c), c.prefix)
+    c.kind === "redis" ?
+      makeRedisRepo(c.url) :
+      c.kind === "postgres" ?
+        (makePostgresRepo(c.url, c.prefix) as Repo) :
+        makeRepo(openDb(c), c.prefix)
   ])
 )
 const defaultRepo = repos.get(config.clusters[0].name)!
@@ -815,11 +820,13 @@ export const api = HttpRouter.concat(HttpRouter.concat(HttpRouter.concat(baseRou
 
   HttpRouter.get(
     "/api/traces/:traceId",
-    Effect.map(req, (p) => {
+    Effect.flatMap(req, (p) => {
       const repo = repoFor(p.cluster)
       if (!repo || !p.traceId) return notFound(p.traceId ? "cluster" : "traceId")
-      const rows = repo.trace(decodeURIComponent(p.traceId))
-      return rows.length === 0 ? notFound("trace") : json({ traceId: decodeURIComponent(p.traceId), rows })
+      const traceId = decodeURIComponent(p.traceId)
+      return Effect.map(Effect.tryPromise(() => Promise.resolve(repo.trace(traceId))), (rows) =>
+        rows.length === 0 ? notFound("trace") : json({ traceId, rows })
+      )
     })
   ),
 

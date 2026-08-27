@@ -80,8 +80,8 @@ export interface TraceList {
   total: number
 }
 
-interface RawMessageRow {
-  readonly id: number | bigint
+export interface RawMessageRow {
+  readonly id: number | bigint | string
   readonly message_id: string | null
   readonly shard_id: number | string
   readonly entity_type: string
@@ -93,12 +93,12 @@ interface RawMessageRow {
   readonly trace_id: string | null
   readonly processed: number
   readonly last_read: string | null
-  readonly deliver_at: number | bigint | null
+  readonly deliver_at: number | bigint | string | null
   readonly reply_count?: number
   readonly failed_flag?: number
 }
 
-function kindName(kind: number): string {
+export function kindName(kind: number): string {
   return kind === 0 ? "request" : kind === 1 ? "ack" : kind === 2 ? "interrupt" : `kind:${kind}`
 }
 
@@ -108,7 +108,7 @@ function kindName(kind: number): string {
 const FAILED_EXISTS_SQL =
   "EXISTS(SELECT 1 FROM %REPLIES% r WHERE r.request_id = %.ID% AND r.kind = 0 AND json_extract(r.payload,'$._tag') = 'Failure')"
 
-function toMessageView(row: RawMessageRow): MessageView {
+export function toMessageView(row: RawMessageRow): MessageView {
   const { createdAt, machineId } = decodeSnowflake(String(row.id))
   return {
     id: String(row.id),
@@ -135,7 +135,7 @@ function toMessageView(row: RawMessageRow): MessageView {
   }
 }
 
-function safeJson(s: string | null): unknown {
+export function safeJson(s: string | null): unknown {
   if (s === null) return null
   try {
     return JSON.parse(s)

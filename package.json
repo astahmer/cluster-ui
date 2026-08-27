@@ -47,6 +47,7 @@
     "mime": "4.1.0",
     "msgpackr": "2.0.5",
     "multipasta": "0.2.8",
+    "postgres": "3.4.9",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "tailwind-merge": "3.6.0",
