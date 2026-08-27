@@ -183,6 +183,12 @@ async function runVariant(label, clusterParam) {
   if ((await row.count()) > 0) {
     await row.click()
     await page.waitForTimeout(1500)
+    const messagePanel = page.locator('.fixed.inset-0 > [role="dialog"]').last()
+    const messagePanelWidth = await messagePanel.evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth
+    }))
+    check("[" + label + "] message detail stays within panel width", messagePanelWidth.scrollWidth <= messagePanelWidth.clientWidth + 1)
     check(`[${label}] message detail opens without crash`, errors.length === 0)
     if (errors.length > 0) console.log("   ", errors.slice(0, 3))
     // P1-1: opening a message writes #/messages/<id>; reloading it rehydrates the panel
@@ -217,6 +223,20 @@ async function runVariant(label, clusterParam) {
       const runHash = await page.evaluate(() => window.location.hash)
       check(`[${label}] workflow-run deep-link hash`, /^#\/workflows\/[^/]+\//.test(runHash))
       await goto(runHash.slice(1), 1800)
+      const workflowMessageLink = page.locator('.fixed.inset-0 a[href^="#/messages/"]').first()
+      if ((await workflowMessageLink.count()) > 0) {
+        await workflowMessageLink.click()
+        await page.waitForTimeout(1500)
+        const messageFromWorkflowHash = await page.evaluate(() => window.location.hash)
+        check("[" + label + "] workflow message link preserves origin", messageFromWorkflowHash.includes("returnTo=%2Fworkflows%2F"))
+        check("[" + label + "] message detail offers workflow backlink", (await page.getByRole("link", { name: /back to workflow run/i }).count()) === 1)
+        const backToWorkflow = page.getByRole("link", { name: /back to workflow run/i })
+        await backToWorkflow.click()
+        await page.waitForTimeout(1500)
+        check("[" + label + "] workflow backlink restores run route", /^#\/workflows\/[^/]+\//.test(await page.evaluate(() => window.location.hash)))
+      } else {
+        check("[" + label + "] workflow message link present", false)
+      }
       check(`[${label}] workflow-run hydrates from URL`, (await page.locator(".fixed.inset-0").count()) > 0)
       await page.keyboard.press("Escape")
       await page.waitForTimeout(400)
