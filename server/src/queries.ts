@@ -47,6 +47,7 @@ export interface MessageQuery {
 
 export interface MessageView {
   id: string
+  requestId: string | null
   messageId: string | null
   shardId: string
   entityType: string
@@ -68,6 +69,7 @@ export interface MessageView {
 export interface TraceSummary {
   traceId: string
   count: number
+  failedCount: number
   kinds: string[]
   services: string[]
   firstAt: number
@@ -82,6 +84,7 @@ export interface TraceList {
 
 export interface RawMessageRow {
   readonly id: number | bigint | string
+  readonly request_id?: number | bigint | string | null
   readonly message_id: string | null
   readonly shard_id: number | string
   readonly entity_type: string
@@ -112,6 +115,7 @@ export function toMessageView(row: RawMessageRow): MessageView {
   const { createdAt, machineId } = decodeSnowflake(String(row.id))
   return {
     id: String(row.id),
+    requestId: row.request_id === null || row.request_id === undefined ? null : String(row.request_id),
     messageId: row.message_id ?? null,
     shardId: String(row.shard_id),
     entityType: row.entity_type,
@@ -211,7 +215,7 @@ export function makeRepo(db: Database.Database, prefix: string = config.prefix) 
     )
     const rows = db
       .prepare(
-        `SELECT CAST(m.id AS TEXT) as id, m.message_id, m.shard_id, m.entity_type, m.entity_id,
+        `SELECT CAST(m.id AS TEXT) as id, m.request_id, m.message_id, m.shard_id, m.entity_type, m.entity_id,
            m.kind, m.tag, m.payload, m.headers, m.trace_id, m.processed, m.last_read, m.deliver_at,
            (${failedExistsFor("id")}) as failed_flag,
            (SELECT COUNT(*) FROM ${t.replies} r WHERE r.request_id = m.id) as reply_count
@@ -223,7 +227,7 @@ export function makeRepo(db: Database.Database, prefix: string = config.prefix) 
   }
 
   const getMessage = (id: string) => {
-    const row = db.prepare(`SELECT CAST(id AS TEXT) as id, message_id, shard_id, entity_type, entity_id,
+    const row = db.prepare(`SELECT CAST(id AS TEXT) as id, request_id, message_id, shard_id, entity_type, entity_id,
        kind, tag, payload, headers, trace_id, processed, last_read, deliver_at,
        (${failedExistsFor("id")}) as failed_flag
      FROM ${t.messages} m WHERE CAST(m.id AS TEXT) = ?`).get(id) as
@@ -503,7 +507,7 @@ export function makeRepo(db: Database.Database, prefix: string = config.prefix) 
     const rows = db
       .prepare(
         `SELECT CAST(m.id AS TEXT) as id, m.entity_id as entity_id, m.entity_type as entity_type,
-           m.message_id, m.shard_id,
+           m.request_id, m.message_id, m.shard_id,
            m.kind, m.tag, m.payload, m.headers, m.trace_id, m.processed, m.last_read, m.deliver_at,
            (${failedExistsFor("id")}) as failed_flag,
            (SELECT COUNT(*) FROM ${t.replies} r WHERE r.request_id = m.id) as reply_count
@@ -533,7 +537,7 @@ export function makeRepo(db: Database.Database, prefix: string = config.prefix) 
   const workflowRun = (name: string, executionId: string) => {
     const rows = db
       .prepare(
-        `SELECT CAST(id AS TEXT) as id, message_id, shard_id, entity_type, entity_id,
+        `SELECT CAST(id AS TEXT) as id, request_id, message_id, shard_id, entity_type, entity_id,
            kind, tag, payload, headers, trace_id, processed, last_read, deliver_at,
            (${failedExistsFor("id")}) as failed_flag
          FROM ${t.messages} m
@@ -637,6 +641,7 @@ export function makeRepo(db: Database.Database, prefix: string = config.prefix) 
     const rows = db
       .prepare(
         `SELECT m.trace_id as traceId, COUNT(*) as count,
+           SUM(CASE WHEN ${failedExistsFor("id")} THEN 1 ELSE 0 END) as failedCount,
            MIN(m.id) as firstId, MAX(m.id) as lastId,
            GROUP_CONCAT(DISTINCT m.kind) as kinds,
            GROUP_CONCAT(DISTINCT m.entity_type) as services
@@ -649,6 +654,7 @@ export function makeRepo(db: Database.Database, prefix: string = config.prefix) 
       .all(...searchParams, limit, offset) as ReadonlyArray<{
       traceId: string
       count: number | bigint
+      failedCount: number | bigint
       firstId: number | bigint
       lastId: number | bigint
       kinds: string | null
@@ -658,6 +664,7 @@ export function makeRepo(db: Database.Database, prefix: string = config.prefix) 
       rows: rows.map((r) => ({
         traceId: r.traceId,
         count: Number(r.count),
+        failedCount: Number(r.failedCount ?? 0),
         kinds:
           r.kinds === null ? [] :
           String(r.kinds)
@@ -680,7 +687,7 @@ export function makeRepo(db: Database.Database, prefix: string = config.prefix) 
   const trace = (traceId: string) => {
     const rows = db
       .prepare(
-        `SELECT CAST(m.id AS TEXT) as id, m.message_id, m.shard_id, m.entity_type, m.entity_id,
+        `SELECT CAST(m.id AS TEXT) as id, m.request_id, m.message_id, m.shard_id, m.entity_type, m.entity_id,
            m.kind, m.tag, m.payload, m.headers, m.trace_id, m.processed, m.last_read, m.deliver_at,
            (${failedExistsFor("id")}) as failed_flag,
            (SELECT COUNT(*) FROM ${t.replies} r WHERE CAST(r.request_id AS TEXT) = m.id) as reply_count

@@ -62,6 +62,7 @@ export function TracesPage({
       (rows ?? []).map((t) => ({
         traceId: t.traceId,
         spans: t.count,
+        failedSpans: t.failedCount,
         services: t.services.join(","),
         firstSpanAt: t.firstAt,
         lastSpanAt: t.lastAt
@@ -120,6 +121,7 @@ export function TracesPage({
             <TR>
               <TH>Trace ID</TH>
               <TH className="text-right">Spans</TH>
+              <TH>Status</TH>
               <TH>Services</TH>
               <TH>First span</TH>
               <TH>Last span</TH>
@@ -151,12 +153,16 @@ export function TracesPage({
                   </TD>
                   <TD className="text-right tabular-nums">{t.count}</TD>
                   <TD>
+                    {t.failedCount > 0 ? <Badge tone="err">{t.failedCount} failed</Badge> : <Badge tone="ok">healthy</Badge>}
+                  </TD>
+                  <TD>
                     <div className="flex flex-wrap gap-1">
-                      {(t.services.length > 0 ? t.services : ["—"]).map((k) => (
+                      {(t.services.length > 0 ? t.services.slice(0, 2) : ["—"]).map((k) => (
                         <Badge key={k} tone="info">
                           {k}
                         </Badge>
                       ))}
+                      {t.services.length > 2 && <span className="text-[11px] text-kumo-subtle">+{t.services.length - 2} more</span>}
                     </div>
                   </TD>
                   <TD className="text-kumo-subtle">{fmtTime(t.firstAt)}</TD>
@@ -430,6 +436,18 @@ function TraceDetailBody({ traceId, compact }: { traceId: string; compact?: bool
 
 function toSpans(rows: ReadonlyArray<Message>): TimelineSpan[] {
   const sorted = [...rows].sort((a, b) => a.createdAt - b.createdAt)
+  const rowsById = new Map(sorted.map((row) => [row.id, row]))
+  const depthById = new Map<string, number>()
+  const depthFor = (row: Message, trail = new Set<string>()): number => {
+    const cached = depthById.get(row.id)
+    if (cached !== undefined) return cached
+    if (!row.requestId || row.requestId === row.id || !rowsById.has(row.requestId) || trail.has(row.id)) return 0
+    const nextTrail = new Set(trail)
+    nextTrail.add(row.id)
+    const depth = depthFor(rowsById.get(row.requestId)!, nextTrail) + 1
+    depthById.set(row.id, depth)
+    return depth
+  }
   // prefer the real span duration recorded in headers (`spanDurationMs`, as the
   // engine/OTel bridge writes it); fall back to deriving an end from the next
   // span's start, with a nominal bar for the last span
@@ -464,7 +482,9 @@ function toSpans(rows: ReadonlyArray<Message>): TimelineSpan[] {
       badge: <span className="shrink-0 text-[9px] text-kumo-subtle">{durationSource === "recorded" ? "real" : "est."}</span>,
       detail: `${m.entityType}/${m.entityId} · ${m.kind} · ${m.tag || "untagged"} · ${m.status}${m.failed ? " · failed" : ""}`,
       searchText: `${label} ${m.entityType} ${m.entityId} ${m.kind} ${m.tag ?? ""}`,
-      durationSource
+      durationSource,
+      parentKey: m.requestId && m.requestId !== m.id && rowsById.has(m.requestId) ? m.requestId : undefined,
+      depth: depthFor(m)
     }
   })
 }

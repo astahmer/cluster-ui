@@ -23,6 +23,8 @@ export interface TimelineSpan {
   detail?: string
   searchText?: string
   durationSource?: "recorded" | "inferred"
+  parentKey?: string
+  depth?: number
 }
 
 const TONE_BAR: Record<NonNullable<TimelineSpan["tone"]>, string> = {
@@ -169,7 +171,7 @@ export function SpanWaterfall({
                   aria-pressed={selected}
                   onClick={() => onSelect?.(s)}
                 >
-                  <span className="flex w-[276px] shrink-0 items-center gap-1.5 truncate pr-1 text-right text-[11px] text-kumo-subtle">
+                  <span className="flex w-[276px] shrink-0 items-center gap-1.5 truncate pl-1 text-left text-[11px] text-kumo-subtle" style={{ paddingLeft: `${Math.max(4, (s.depth ?? 0) * 12 + 4)}px` }}>
                     <span className="truncate">{s.label}</span>
                     {s.badge}
                   </span>

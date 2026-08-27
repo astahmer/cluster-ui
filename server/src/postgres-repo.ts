@@ -26,6 +26,7 @@ const dollarize = (statement: string): string => {
 
 const toRawMessageRow = (row: PgRow): RawMessageRow => ({
   id: String(row.id),
+  request_id: row.request_id === null || row.request_id === undefined ? null : String(row.request_id),
   message_id: row.message_id === null ? null : String(row.message_id),
   shard_id: String(row.shard_id),
   entity_type: String(row.entity_type),
@@ -125,7 +126,7 @@ const makePostgresRepo = (url: string, prefix = "cluster"): Repo => {
       params,
     );
     const rows = await query(
-      `SELECT m.id::text AS id, m.message_id, m.shard_id, m.entity_type, m.entity_id,
+      `SELECT m.id::text AS id, m.request_id, m.message_id, m.shard_id, m.entity_type, m.entity_id,
          m.kind, m.tag, m.payload, m.headers, m.trace_id, m.processed, m.last_read, m.deliver_at,
          (${failedExists(replies, "m.id")})::int AS failed_flag,
          (SELECT COUNT(*) FROM ${replies} r WHERE r.request_id = m.id)::text AS reply_count
@@ -143,7 +144,7 @@ const makePostgresRepo = (url: string, prefix = "cluster"): Repo => {
 
   const getMessage = async (id: string) => {
     const rows = await query(
-      `SELECT m.id::text AS id, m.message_id, m.shard_id, m.entity_type, m.entity_id,
+      `SELECT m.id::text AS id, m.request_id, m.message_id, m.shard_id, m.entity_type, m.entity_id,
          m.kind, m.tag, m.payload, m.headers, m.trace_id, m.processed, m.last_read, m.deliver_at,
          (${failedExists(replies, "m.id")})::int AS failed_flag
        FROM ${messages} m WHERE m.id::text = ?`,
@@ -414,7 +415,7 @@ const makePostgresRepo = (url: string, prefix = "cluster"): Repo => {
 
   const workflowRuns = async (name: string) => {
     const rows = await query(
-      `SELECT m.id::text AS id, m.entity_id, m.entity_type, m.message_id, m.shard_id, m.kind, m.tag, m.payload, m.headers, m.trace_id, m.processed, m.last_read, m.deliver_at, (${failedExists(replies, "m.id")})::int AS failed_flag, (SELECT COUNT(*) FROM ${replies} r WHERE r.request_id = m.id)::text AS reply_count FROM ${messages} m WHERE m.entity_type = ? AND m.tag = 'run' ORDER BY m.id DESC`,
+      `SELECT m.id::text AS id, m.entity_id, m.entity_type, m.request_id, m.message_id, m.shard_id, m.kind, m.tag, m.payload, m.headers, m.trace_id, m.processed, m.last_read, m.deliver_at, (${failedExists(replies, "m.id")})::int AS failed_flag, (SELECT COUNT(*) FROM ${replies} r WHERE r.request_id = m.id)::text AS reply_count FROM ${messages} m WHERE m.entity_type = ? AND m.tag = 'run' ORDER BY m.id DESC`,
       [`Workflow/${name}`],
     );
     return rows.map((row) => {
@@ -434,7 +435,7 @@ const makePostgresRepo = (url: string, prefix = "cluster"): Repo => {
 
   const workflowRun = async (name: string, executionId: string) => {
     const rows = await query(
-      `SELECT m.id::text AS id, m.message_id, m.shard_id, m.entity_type, m.entity_id, m.kind, m.tag, m.payload, m.headers, m.trace_id, m.processed, m.last_read, m.deliver_at, (${failedExists(replies, "m.id")})::int AS failed_flag FROM ${messages} m WHERE m.entity_type = ? AND m.entity_id = ? ORDER BY m.id`,
+      `SELECT m.id::text AS id, m.request_id, m.message_id, m.shard_id, m.entity_type, m.entity_id, m.kind, m.tag, m.payload, m.headers, m.trace_id, m.processed, m.last_read, m.deliver_at, (${failedExists(replies, "m.id")})::int AS failed_flag FROM ${messages} m WHERE m.entity_type = ? AND m.entity_id = ? ORDER BY m.id`,
       [`Workflow/${name}`, executionId],
     );
     if (rows.length === 0) return null;
@@ -535,13 +536,14 @@ const makePostgresRepo = (url: string, prefix = "cluster"): Repo => {
       params,
     );
     const rows = await query(
-      `SELECT m.trace_id AS "traceId", COUNT(*)::text AS count, MIN(m.id)::text AS "firstId", MAX(m.id)::text AS "lastId", ARRAY_AGG(DISTINCT m.kind) AS kinds, ARRAY_AGG(DISTINCT m.entity_type) AS services FROM ${messages} m ${where} GROUP BY m.trace_id ORDER BY MAX(m.id) DESC LIMIT ? OFFSET ?`,
+      `SELECT m.trace_id AS "traceId", COUNT(*)::text AS count, SUM(CASE WHEN ${failedExists(replies, "m.id")} THEN 1 ELSE 0 END)::text AS "failedCount", MIN(m.id)::text AS "firstId", MAX(m.id)::text AS "lastId", ARRAY_AGG(DISTINCT m.kind) AS kinds, ARRAY_AGG(DISTINCT m.entity_type) AS services FROM ${messages} m ${where} GROUP BY m.trace_id ORDER BY MAX(m.id) DESC LIMIT ? OFFSET ?`,
       [...params, limit, offset],
     );
     return {
       rows: rows.map((row) => ({
         traceId: String(row.traceId),
         count: numberValue(row.count),
+        failedCount: numberValue(row.failedCount),
         kinds: Array.isArray(row.kinds) ? row.kinds.map((kind) => kindName(Number(kind))) : [],
         services: Array.isArray(row.services) ? row.services.map(String) : [],
         firstAt: decodeSnowflake(String(row.firstId)).createdAt,
@@ -553,7 +555,7 @@ const makePostgresRepo = (url: string, prefix = "cluster"): Repo => {
 
   const trace = async (traceId: string) => {
     const rows = await query(
-      `SELECT m.id::text AS id, m.message_id, m.shard_id, m.entity_type, m.entity_id, m.kind, m.tag, m.payload, m.headers, m.trace_id, m.processed, m.last_read, m.deliver_at, (${failedExists(replies, "m.id")})::int AS failed_flag, (SELECT COUNT(*) FROM ${replies} r WHERE r.request_id = m.id)::text AS reply_count FROM ${messages} m WHERE m.trace_id = ? ORDER BY m.id ASC`,
+      `SELECT m.id::text AS id, m.request_id, m.message_id, m.shard_id, m.entity_type, m.entity_id, m.kind, m.tag, m.payload, m.headers, m.trace_id, m.processed, m.last_read, m.deliver_at, (${failedExists(replies, "m.id")})::int AS failed_flag, (SELECT COUNT(*) FROM ${replies} r WHERE r.request_id = m.id)::text AS reply_count FROM ${messages} m WHERE m.trace_id = ? ORDER BY m.id ASC`,
       [traceId],
     );
     return rows.map((row) => toMessageView(toRawMessageRow(row)));

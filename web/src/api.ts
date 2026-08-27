@@ -40,6 +40,7 @@ export interface EntityStat {
 
 export interface Message {
   id: string
+  requestId: string | null
   messageId: string | null
   shardId: string
   entityType: string
@@ -399,6 +400,7 @@ export interface QueueJobList {
 export interface TraceSummary {
   traceId: string
   count: number
+  failedCount: number
   kinds: string[]
   services: string[]
   firstAt: number
