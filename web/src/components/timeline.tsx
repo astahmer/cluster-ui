@@ -20,6 +20,9 @@ export interface TimelineSpan {
   endMs: number
   tone?: "default" | "danger" | "success" | "warning"
   badge?: React.ReactNode
+  detail?: string
+  searchText?: string
+  durationSource?: "recorded" | "inferred"
 }
 
 const TONE_BAR: Record<NonNullable<TimelineSpan["tone"]>, string> = {
@@ -68,11 +71,15 @@ function axisLabel(ms: number): string {
 
 export function SpanWaterfall({
   spans,
-  height
+  height,
+  selectedKey,
+  onSelect
 }: {
   spans: TimelineSpan[]
   /** minimum height of the tracks area (px); rows size naturally */
   height?: number
+  selectedKey?: string | null
+  onSelect?: (span: TimelineSpan) => void
 }) {
   const timed = spans.filter((s) => Number.isFinite(s.startMs))
   if (timed.length === 0) return null
@@ -96,7 +103,7 @@ export function SpanWaterfall({
   const ticks = displayTicks(t0, t1)
 
   let lastGroup: string | undefined
-  let seenKey = new Set<string>()
+  const seenKey = new Set<string>()
 
   return (
     <div className="overflow-x-auto rounded-md border border-kumo-line">
@@ -141,6 +148,9 @@ export function SpanWaterfall({
               zeroDur ? "" : ` → ${axisLabel(s.endMs - s.startMs).replace(/^\+/, "")}`
             }`
 
+            const selected = selectedKey === s.key
+            const rowLabel = `${typeof s.label === "string" || typeof s.label === "number" ? s.label : "span"} · ${axisLabel(s.endMs - s.startMs).replace(/^\+/, "")} · ${s.tone === "danger" ? "failed" : s.tone === "success" ? "completed" : "active"}`
+
             return (
               <React.Fragment key={s.key}>
                 {showGroupHeader && (
@@ -148,11 +158,21 @@ export function SpanWaterfall({
                     {s.group}
                   </div>
                 )}
-                <div className="flex items-center gap-3 py-[3px]" title={tip}>
-                  <div className="flex w-[196px] shrink-0 items-center gap-1.5 truncate text-right text-[11px] text-kumo-subtle">
+                <button
+                  type="button"
+                  className={cn(
+                    "group flex w-full items-center gap-3 rounded py-[3px] text-left transition-colors hover:bg-kumo-tint/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-kumo-brand",
+                    selected && "bg-kumo-tint/80"
+                  )}
+                  title={tip}
+                  aria-label={rowLabel}
+                  aria-pressed={selected}
+                  onClick={() => onSelect?.(s)}
+                >
+                  <span className="flex w-[196px] shrink-0 items-center gap-1.5 truncate text-right text-[11px] text-kumo-subtle">
                     <span className="truncate">{s.label}</span>
                     {s.badge}
-                  </div>
+                  </span>
                   <div className="relative h-4 flex-1">
                     {/* vertical gridlines */}
                     {ticks.map((t) => (
@@ -166,19 +186,24 @@ export function SpanWaterfall({
                     {zeroDur ? (
                       <span
                         className={cn(
-                          "absolute top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rotate-45",
+                          "absolute top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rotate-45 ring-2 ring-transparent",
+                          selected && "ring-kumo-default",
                           TONE_BAR[s.tone ?? "default"]
                         )}
                         style={{ left: `${left}%` }}
                       />
                     ) : (
                       <span
-                        className={cn("absolute top-1/2 h-2.5 -translate-y-1/2 rounded-sm", TONE_BAR[s.tone ?? "default"])}
+                        className={cn(
+                          "absolute top-1/2 h-2.5 -translate-y-1/2 rounded-sm ring-2 ring-transparent",
+                          selected && "ring-kumo-default",
+                          TONE_BAR[s.tone ?? "default"]
+                        )}
                         style={{ left: `${left}%`, width: `${width}%` }}
                       />
                     )}
                   </div>
-                </div>
+                </button>
               </React.Fragment>
             )
           })}

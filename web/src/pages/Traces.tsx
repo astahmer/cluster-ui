@@ -1,5 +1,5 @@
 import * as React from "react"
-import { Stack } from "@phosphor-icons/react"
+import { Copy, MagnifyingGlass, Stack, WarningCircle } from "@phosphor-icons/react"
 import { api, type Message, type TraceSummary } from "../api.ts"
 import { Badge, Button, Input, Table, TBody, TD, TH, THead, TR } from "../components/ui.tsx"
 import { DetailPanel, SkeletonTable, StatusBadge, rowInteractions, Pager } from "../components/pieces.tsx"
@@ -236,6 +236,9 @@ function TraceDetailBody({ traceId, compact }: { traceId: string; compact?: bool
   const [streamState, setStreamState] = React.useState<"connecting" | "live" | "polling">("connecting")
   const [lastUpdated, setLastUpdated] = React.useState<number | null>(null)
   const cluster = useCluster()
+  const [spanSearch, setSpanSearch] = React.useState("")
+  const [focus, setFocus] = React.useState<"all" | "failed" | "slow">("all")
+  const [selectedKey, setSelectedKey] = React.useState<string | null>(null)
   const { refresh } = useLive(async () => {
     try {
       const res = await api.trace(traceId)
@@ -293,6 +296,20 @@ function TraceDetailBody({ traceId, compact }: { traceId: string; compact?: bool
   }, [traceId, cluster])
 
   const spans = toSpans(rows ?? [])
+  const filteredSpans = React.useMemo(() => {
+    const query = spanSearch.trim().toLowerCase()
+    return spans.filter((span) => {
+      const matchesQuery = query === "" || span.searchText?.toLowerCase().includes(query)
+      const matchesFocus = focus === "all" || (focus === "failed" ? span.tone === "danger" : span.endMs - span.startMs >= 1000)
+      return matchesQuery && matchesFocus
+    })
+  }, [focus, spanSearch, spans])
+  const selectedSpan = spans.find((span) => span.key === selectedKey) ?? null
+  const failedCount = spans.filter((span) => span.tone === "danger").length
+  const slowestSpan = spans.reduce<TimelineSpan | null>((slowest, span) => {
+    if (slowest === null || span.endMs - span.startMs > slowest.endMs - slowest.startMs) return span
+    return slowest
+  }, null)
   const totalMs = spans.length >= 2 ? Math.max(...spans.map((s) => s.endMs)) - Math.min(...spans.map((s) => s.startMs)) : 0
 
   return (
@@ -307,18 +324,63 @@ function TraceDetailBody({ traceId, compact }: { traceId: string; compact?: bool
         </div>
       ) : (
         <div className="rounded-lg border border-kumo-line bg-kumo-base p-3">
-          <div className="mb-2 flex items-center justify-between text-[11px] text-kumo-subtle">
-            <span>
-              waterfall — {formatDuration(totalMs)} total · {rows.length} spans
-            </span>
-            <span className="flex items-center gap-1.5">
+          <div className="mb-3 grid gap-2 sm:grid-cols-[1fr_auto] sm:items-start">
+            <div>
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-kumo-subtle">
+                <span className="font-medium text-kumo-default">Trace timeline</span>
+                <span>{formatDuration(totalMs)} total</span>
+                <span>{rows.length} spans</span>
+                {failedCount > 0 && <Badge tone="err">{failedCount} failed</Badge>}
+                {slowestSpan && <span>slowest {formatDuration(slowestSpan.endMs - slowestSpan.startMs)}</span>}
+              </div>
+              <p className="mt-1 text-[11px] text-kumo-subtle">
+                Select a span to inspect its message, timing, and related IDs. Bars marked inferred use neighboring message timestamps.
+              </p>
+            </div>
+            <span className="flex items-center gap-1.5 text-[11px] text-kumo-subtle">
               <Badge tone={streamState === "live" ? "ok" : "neutral"}>
                 {streamState === "live" ? "live" : "polling"}
               </Badge>
               {lastUpdated && <span>updated {fmtTime(lastUpdated)}</span>}
             </span>
           </div>
-          <SpanWaterfall spans={spans} />
+          <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-kumo-line bg-kumo-canvas p-2">
+            <label className="relative min-w-48 flex-1 sm:max-w-xs">
+              <MagnifyingGlass className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-kumo-subtle" />
+              <Input
+                aria-label="search spans"
+                placeholder="search spans, tags, entities…"
+                value={spanSearch}
+                onChange={(event) => setSpanSearch(event.target.value)}
+                className="h-8 pl-7"
+              />
+            </label>
+            <div className="flex items-center gap-1" role="group" aria-label="trace focus">
+              {(["all", "failed", "slow"] as const).map((value) => (
+                <Button key={value} variant={focus === value ? "secondary" : "ghost"} size="sm" onClick={() => setFocus(value)}>
+                  {value === "all" ? "all spans" : value === "failed" ? "failed" : "slow ≥ 1s"}
+                </Button>
+              ))}
+            </div>
+            <span className="ml-auto text-[11px] tabular-nums text-kumo-subtle">
+              showing {filteredSpans.length}/{spans.length}
+            </span>
+          </div>
+          <div className="mb-2 flex flex-wrap gap-3 text-[10px] text-kumo-subtle" aria-label="timeline legend">
+            <span className="inline-flex items-center gap-1"><i className="h-2 w-2 rounded-full bg-kumo-success" /> completed</span>
+            <span className="inline-flex items-center gap-1"><i className="h-2 w-2 rounded-full bg-kumo-danger" /> failed</span>
+            <span className="inline-flex items-center gap-1"><i className="h-2 w-2 rounded-full bg-kumo-brand/70" /> active/unknown</span>
+            <span className="ml-auto">click any row for details</span>
+          </div>
+          <SpanWaterfall spans={filteredSpans} selectedKey={selectedKey} onSelect={(span) => setSelectedKey(span.key)} />
+          {filteredSpans.length === 0 && (
+            <div className="rounded-md border border-dashed border-kumo-line px-3 py-5 text-center text-[12px] text-kumo-subtle">
+              No spans match this focus. <button type="button" className="underline" onClick={() => { setFocus("all"); setSpanSearch("") }}>clear filters</button>
+            </div>
+          )}
+          {selectedSpan && (
+            <SpanInspector span={selectedSpan} onClose={() => setSelectedKey(null)} />
+          )}
         </div>
       )}
 
@@ -339,13 +401,21 @@ function TraceDetailBody({ traceId, compact }: { traceId: string; compact?: bool
                 <TR key={m.id}>
                   <TD>
                     <StatusBadge status={m.status} />
+                    {m.failed && <Badge tone="err" className="ml-1">failed</Badge>}
                   </TD>
                   <TD className="font-medium">
-                    {m.entityType}/{m.entityId}
+                    <a href={`#/messages/${encodeURIComponent(m.id)}`} className="hover:text-kumo-link hover:underline">
+                      {m.entityType}/{m.entityId}
+                    </a>
                   </TD>
                   <TD className="text-kumo-subtle">{m.kind}</TD>
                   <TD className="font-mono text-[11px] text-kumo-subtle">{m.tag || "—"}</TD>
-                  <TD className="text-kumo-subtle">{fmtTime(m.createdAt)}</TD>
+                  <TD className="text-kumo-subtle">
+                    <span className="mr-2">{fmtTime(m.createdAt)}</span>
+                    <button type="button" className="text-kumo-subtle hover:text-kumo-default" aria-label={`copy message ${m.id}`} title="copy message id" onClick={() => copyText(m.id)}>
+                      <Copy className="inline h-3 w-3" />
+                    </button>
+                  </TD>
                 </TR>
               ))}
             </TBody>
@@ -371,13 +441,15 @@ function toSpans(rows: ReadonlyArray<Message>): TimelineSpan[] {
     } catch {
       // malformed headers → heuristic fallback
     }
+    const durationSource = durMs !== null ? "recorded" : "inferred"
     const endMs =
       durMs !== null ? m.createdAt + durMs : next ? Math.max(next.createdAt, m.createdAt + 1) : m.createdAt + Math.max(totalHint(sorted), 250)
+    const label = m.tag || m.entityType
     return {
       key: m.id,
       label: (
         <>
-          <span className="font-medium">{m.tag || m.entityType}</span>
+          <span className="font-medium">{label}</span>
           {m.tag && m.entityType && <span className="text-kumo-subtle"> · {m.entityType}</span>}
         </>
       ),
@@ -385,9 +457,41 @@ function toSpans(rows: ReadonlyArray<Message>): TimelineSpan[] {
       startMs: m.createdAt,
       endMs,
       tone: m.failed ? "danger" : m.status === "done" ? "success" : "default",
-      badge: undefined
+      badge: <span className="shrink-0 text-[9px] text-kumo-subtle">{durationSource === "recorded" ? "real" : "est."}</span>,
+      detail: `${m.entityType}/${m.entityId} · ${m.kind} · ${m.tag || "untagged"} · ${m.status}${m.failed ? " · failed" : ""}`,
+      searchText: `${label} ${m.entityType} ${m.entityId} ${m.kind} ${m.tag ?? ""}`,
+      durationSource
     }
   })
+}
+
+function SpanInspector({ span, onClose }: { span: TimelineSpan; onClose: () => void }) {
+  const duration = Math.max(0, span.endMs - span.startMs)
+  return (
+    <section className="mt-3 rounded-md border border-kumo-brand/40 bg-kumo-canvas p-3" aria-label="selected span details">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-kumo-subtle">Selected span</div>
+          <div className="mt-1 truncate text-sm font-medium">{span.detail ?? "span"}</div>
+        </div>
+        <button type="button" className="text-xs text-kumo-subtle underline hover:text-kumo-default" onClick={onClose}>clear</button>
+      </div>
+      <dl className="mt-3 grid gap-x-4 gap-y-2 text-[11px] sm:grid-cols-4">
+        <div><dt className="text-kumo-subtle">Started</dt><dd className="mt-0.5 tabular-nums">{fmtTime(span.startMs)}</dd></div>
+        <div><dt className="text-kumo-subtle">Duration</dt><dd className="mt-0.5 tabular-nums">{formatDuration(duration)}</dd></div>
+        <div><dt className="text-kumo-subtle">Status</dt><dd className="mt-0.5">{span.tone === "danger" ? "failed" : span.tone === "success" ? "completed" : "active/unknown"}</dd></div>
+        <div><dt className="text-kumo-subtle">Timing</dt><dd className="mt-0.5">{span.durationSource === "recorded" ? "recorded" : "inferred"}</dd></div>
+      </dl>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <a href={`#/messages/${encodeURIComponent(span.key)}`} className="text-xs text-kumo-link underline-offset-2 hover:underline">open message detail ↗</a>
+        <button type="button" className="inline-flex items-center gap-1 text-xs text-kumo-subtle hover:text-kumo-default" onClick={() => copyText(span.key)}><Copy className="h-3 w-3" /> copy message id</button>
+      </div>
+    </section>
+  )
+}
+
+function copyText(value: string) {
+  navigator.clipboard?.writeText(value).catch(() => {})
 }
 
 function totalHint(sorted: ReadonlyArray<Message>): number {
