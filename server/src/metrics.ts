@@ -1,4 +1,5 @@
-import { Effect, Layer } from "effect"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
 import type { Repo } from "./queries.ts"
 
 /**
@@ -134,7 +135,7 @@ export const samplerLayer = (
 ): Layer.Layer<never> =>
   // fork so layer acquisition completes; fiber lives for the layer's scope
   Layer.effectDiscard(
-    Effect.forkDaemon(
+    Effect.forkDetach(
       Effect.forever(
         Effect.andThen(
           Effect.promise(() => recordSample(getRepos())),

@@ -12,21 +12,7 @@
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "allowImportingTsExtensions": true,
-    "types": ["node"],
-    "paths": {
-      // linked effect v4 monorepo sources can't resolve each other's bare
-      // specifiers (no node_modules in that checkout) — map them explicitly
-      "effect": ["./node_modules/effect"],
-      "effect/*": ["./node_modules/effect/*"],
-      "@effect/platform": ["./node_modules/@effect/platform"],
-      "@effect/platform/*": ["./node_modules/@effect/platform/*"],
-      "@effect/platform-node": ["./node_modules/@effect/platform-node"],
-      "@effect/platform-node/*": ["./node_modules/@effect/platform-node/*"],
-      "@effect/platform-node-shared": ["./node_modules/@effect/platform-node-shared"],
-      "@effect/platform-node-shared/*": ["./node_modules/@effect/platform-node-shared/*"],
-      "@effect/sql": ["./node_modules/@effect/sql"],
-      "@effect/sql/*": ["./node_modules/@effect/sql/*"]
-    }
+    "types": ["node"]
   },
   "include": ["server/src", "server/scripts", "web/src", "vite.config.ts"]
 }

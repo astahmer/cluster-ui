@@ -1,7 +1,7 @@
-import { HttpServer } from "@effect/platform"
+import * as HttpRouter from "effect/unstable/http/HttpRouter"
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer"
 import * as NodeRuntime from "@effect/platform-node-shared/NodeRuntime"
-import { Layer } from "effect"
+import * as Layer from "effect/Layer"
 import { createServer } from "node:http"
 import { api, clusterRepos } from "./api.ts"
 import { authorization } from "./auth.ts"
@@ -14,11 +14,11 @@ const ServerLive = NodeHttpServer.layer(() => createServer(), {
   host: config.host
 })
 
-// token auth wraps every request when CLUSTER_UI_TOKEN is configured
-const app = (config.authToken ? authorization(api) : api) as typeof api
+// token auth wraps every request; the middleware itself no-ops when CLUSTER_UI_TOKEN is unset
+const AppRoutes = HttpRouter.addAll(api)
+const AuthMiddleware = HttpRouter.use((router) => router.addGlobalMiddleware(authorization))
 
-const Main = app.pipe(
-  HttpServer.serve(),
+const Main = HttpRouter.serve(Layer.mergeAll(AppRoutes, AuthMiddleware)).pipe(
   Layer.provide(ServerLive),
   Layer.provide(metrics.samplerLayer(clusterRepos)),
   Layer.launch

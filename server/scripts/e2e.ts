@@ -2,10 +2,11 @@
  * Boots the API router on an ephemeral port and exercises every endpoint.
  *   pnpm e2e
  */
-import { HttpServer } from "@effect/platform"
+import * as HttpRouter from "effect/unstable/http/HttpRouter"
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer"
 import * as NodeRuntime from "@effect/platform-node-shared/NodeRuntime"
-import { Effect, Layer } from "effect"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
 import { createServer } from "node:http"
 import { spawn, type ChildProcess } from "node:child_process"
 import { resolve } from "node:path"
@@ -16,8 +17,7 @@ import * as metrics from "../src/metrics.ts"
 
 const PORT = 8791
 
-const HttpLive = api.pipe(
-  HttpServer.serve(),
+const HttpLive = HttpRouter.serve(HttpRouter.addAll(api)).pipe(
   Layer.provide(NodeHttpServer.layer(() => createServer(), { port: PORT, host: "127.0.0.1" })),
   Layer.provide(metrics.samplerLayer(clusterRepos))
 )
@@ -38,13 +38,7 @@ async function check(name: string, path: string, expect: (body: any) => boolean)
 
 async function run() {
   // demo reporter for the 127.0.0.1:9199 seeded runner
-  const demo = spawn(process.execPath, [
-    "--experimental-transform-types",
-    "--no-warnings",
-    "--import",
-    resolve("server/scripts/register-ts-resolve.mjs"),
-    resolve("server/scripts/demo-runner.ts")
-  ], { stdio: "ignore" })
+  const demo = spawn(process.execPath, [resolve("server/scripts/demo-runner.ts")], { stdio: "ignore" })
   try {
     // wait for the demo reporter to accept connections (best effort)
     for (let i = 0; i < 20; i++) {
@@ -365,9 +359,9 @@ async function runChecks() {
   // ---- auth flow (separate server with CLUSTER_UI_TOKEN) ----------------
   const { spawn } = await import("node:child_process")
   const AUTH_PORT = PORT + 1
-  const child = spawn("node", ["--experimental-transform-types", "--no-warnings", "--import", "./scripts/register-ts-resolve.mjs", "server/src/main.ts"], {
+  const child = spawn(process.execPath, [resolve(import.meta.dirname, "../../server/dist/main.cjs")], {
     cwd: resolve(import.meta.dirname, "../.."),
-    env: { ...process.env, PORT: String(AUTH_PORT), CLUSTER_UI_TOKEN: "secret-token" },
+    env: { ...process.env, PORT: String(AUTH_PORT), CLUSTER_UI_DIST: resolve(import.meta.dirname, "../../dist"), CLUSTER_UI_TOKEN: "secret-token" },
     stdio: "ignore"
   })
   try {
@@ -429,14 +423,11 @@ async function runChecks() {
 
       const R_PORT = PORT + 2
       const envClusters = `default=${resolve(import.meta.dirname, "../../data/cluster.db")},local-redis=redis://127.0.0.1:${REDIS_PORT}`
-      const rchild = spawn("node",
-        ["--experimental-transform-types", "--no-warnings", "--import", "./scripts/register-ts-resolve.mjs", "server/src/main.ts"],
-        {
-          cwd: resolve(import.meta.dirname, "../.."),
-          env: { ...process.env, PORT: String(R_PORT), CLUSTER_UI_CLUSTERS: envClusters },
-          stdio: "ignore"
-        }
-      )
+      const rchild = spawn(process.execPath, [resolve(import.meta.dirname, "../../server/dist/main.cjs")], {
+        cwd: resolve(import.meta.dirname, "../.."),
+        env: { ...process.env, PORT: String(R_PORT), CLUSTER_UI_DIST: resolve(import.meta.dirname, "../../dist"), CLUSTER_UI_CLUSTERS: envClusters },
+        stdio: "ignore"
+      })
       try {
         let rup = false
         for (let i = 0; i < 40 && !rup; i++) {

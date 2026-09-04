@@ -1,5 +1,5 @@
 // Vendored from emi-healthfit @emi/core (protocol/mappers.ts), adapted to zod.
-import { Effect } from "effect";
+import * as Effect from "effect/Effect";
 import { z } from "zod";
 
 import {

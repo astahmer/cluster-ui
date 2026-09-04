@@ -19,7 +19,8 @@ export interface ClusterProfile {
 export function parseClusters(
   rawInput = process.env.CLUSTER_UI_CLUSTERS
 ): ReadonlyArray<ClusterProfile> {
-  const raw = rawInput
+  const target = process.env.CLUSTER_UI_TARGET
+  const raw = rawInput?.trim() ? rawInput : target ? `default=${target}` : rawInput
   if (!raw?.trim()) {
     const profile: ClusterProfile = {
       name: "default",

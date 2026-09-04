@@ -1,5 +1,5 @@
 import * as Effect from "effect/Effect"
-import { Duration } from "effect";
+import * as Duration from "effect/Duration";
 import * as Stream from "effect/Stream";
 import { z } from "zod";
 import { fromCallback } from "xstate";
@@ -132,10 +132,10 @@ const consumeStreamEffect = Effect.fn("chat.transport.consumeStream")(function* 
       }),
     releaseLockOnEnd: true,
   }).pipe(
-    Stream.timeoutTo(
-      Duration.millis(inactivityTimeoutMilliseconds),
-      Stream.fail(new ChatTransportStreamError({ message: "Chat response stalled before completion." })),
-    ),
+    Stream.timeoutOrElse({
+      duration: Duration.millis(inactivityTimeoutMilliseconds),
+      orElse: () => Stream.fail(new ChatTransportStreamError({ message: "Chat response stalled before completion." })),
+    }),
     Stream.takeWhile(() => isCurrent(activeOperation)),
     Stream.runForEach((chunk) =>
       Effect.sync(() => {

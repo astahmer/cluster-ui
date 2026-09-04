@@ -1,10 +1,15 @@
-import { HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "@effect/platform"
-import { Effect, Schedule, Stream } from "effect"
+import * as HttpRouter from "effect/unstable/http/HttpRouter"
+import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest"
+import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
+import * as Effect from "effect/Effect"
+import * as Schedule from "effect/Schedule"
+import * as Stream from "effect/Stream"
 import { convertToModelMessages, stepCountIs, streamText, toUIMessageStream, type LanguageModel, type ToolSet, type UIMessage } from "ai"
 import { createAnthropic } from "@ai-sdk/anthropic"
 import { createOpenAI } from "@ai-sdk/openai"
 import { existsSync, readFileSync } from "node:fs"
-import { join, normalize, resolve } from "node:path"
+import { dirname, join, normalize, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 import { ActionError, assertWritable, deleteMessage, interruptMessage, resetActivity, retryMessage } from "./actions.ts"
 import { AUTH_COOKIE, verifyToken } from "./auth.ts"
 import * as metrics from "./metrics.ts"
@@ -49,7 +54,11 @@ function repoFor(name: string | undefined): Repo | null {
 
 // ---------------------------------------------------------------- static UI --
 // If the built frontend (vite build) exists, serve it from this same process.
-const DIST = resolve("dist")
+// esbuild bundles this file into a CJS entrypoint for the packaged CLI, where
+// `import.meta.url` is unavailable — the packaged CLI always sets CLUSTER_UI_DIST,
+// so this branch only matters for ad hoc `node server/dist/main.cjs` runs.
+const DIST = process.env.CLUSTER_UI_DIST ??
+  (import.meta.url ? resolve(dirname(fileURLToPath(import.meta.url)), "../../dist") : resolve(process.cwd(), "dist"))
 const HAS_DIST = existsSync(join(DIST, "index.html"))
 
 function tryStatic(path: string): HttpServerResponse.HttpServerResponse | null {
@@ -84,14 +93,19 @@ function tryStatic(path: string): HttpServerResponse.HttpServerResponse | null {
   })
 }
 
+/** effect v4 dropped `unsafeJson`; this is the same synchronous shape. */
+function unsafeJson(data: unknown, options?: HttpServerResponse.Options): HttpServerResponse.HttpServerResponse {
+  return HttpServerResponse.raw(JSON.stringify(data), { ...options, contentType: options?.contentType ?? "application/json" })
+}
+
 function json(data: unknown) {
-  return HttpServerResponse.unsafeJson(data, {
+  return unsafeJson(data, {
     headers: { "cache-control": "no-store" }
   })
 }
 
 function notFound(what: string) {
-  return HttpServerResponse.unsafeJson({ error: `${what} not found` }, { status: 404 })
+  return unsafeJson({ error: `${what} not found` }, { status: 404 })
 }
 
 function intParam(u: string | null | undefined): number | undefined {
@@ -233,16 +247,16 @@ function actionHandler(
         if (!repo) return notFound("cluster")
         const messageId = p.body?.messageId
         if (typeof messageId !== "string" || messageId === "") {
-          return HttpServerResponse.unsafeJson({ error: "messageId is required" }, { status: 400 })
+          return unsafeJson({ error: "messageId is required" }, { status: 400 })
         }
         await dispatchAction(repo, redisName ?? "retry", run, messageId)
         recordAudit({ actor, role, action: redisName ?? "retry", cluster: p.cluster ?? p.body?.cluster ?? config.clusters[0].name, target: messageId })
         return json({ ok: true })
       } catch (e) {
         if (e instanceof ActionError) {
-          return HttpServerResponse.unsafeJson({ error: e.message }, { status: e.status })
+          return unsafeJson({ error: e.message }, { status: e.status })
         }
-        return HttpServerResponse.unsafeJson(
+        return unsafeJson(
           { error: e instanceof Error ? e.message : String(e) },
           { status: 500 }
         )
@@ -267,14 +281,14 @@ const bulkActionHandler = Effect.flatMap(reqWithBody, (p) =>
       if (!repo) return notFound("cluster")
       const action = p.body?.action as "retry" | "interrupt" | "delete" | undefined
       if (action !== "retry" && action !== "interrupt" && action !== "delete") {
-        return HttpServerResponse.unsafeJson(
+        return unsafeJson(
           { error: "action must be one of retry | interrupt | delete" },
           { status: 400 }
         )
       }
       const ids = p.body?.ids
       if (!Array.isArray(ids) || ids.length === 0) {
-        return HttpServerResponse.unsafeJson({ error: "non-empty ids array is required" }, { status: 400 })
+        return unsafeJson({ error: "non-empty ids array is required" }, { status: 400 })
       }
       const results: Array<{ id: string; ok: boolean; error?: string; status?: number }> = []
       for (const raw of ids.slice(0, 500)) {
@@ -303,9 +317,9 @@ const bulkActionHandler = Effect.flatMap(reqWithBody, (p) =>
       return json({ results })
     } catch (e) {
       if (e instanceof ActionError) {
-        return HttpServerResponse.unsafeJson({ error: e.message }, { status: e.status })
+        return unsafeJson({ error: e.message }, { status: e.status })
       }
-      return HttpServerResponse.unsafeJson(
+      return unsafeJson(
         { error: e instanceof Error ? e.message : String(e) },
         { status: 500 }
       )
@@ -313,9 +327,9 @@ const bulkActionHandler = Effect.flatMap(reqWithBody, (p) =>
   })
 )
 
-const opsRouter = HttpRouter.empty.pipe(
-  HttpRouter.get("/api/alerts", Effect.sync(() => json(listAlerts()))),
-  HttpRouter.post("/api/alerts", Effect.flatMap(reqWithBody, (p) => Effect.sync(() => {
+const opsRoutes = [
+  HttpRouter.route("GET", "/api/alerts", Effect.sync(() => json(listAlerts()))),
+  HttpRouter.route("POST", "/api/alerts", Effect.flatMap(reqWithBody, (p) => Effect.sync(() => {
     try {
       assertWritable(config.readonly)
       if (role === "viewer") throw new ActionError("operator role required", 403)
@@ -323,10 +337,10 @@ const opsRouter = HttpRouter.empty.pipe(
       recordAudit({ actor, role, action: "alert-create", cluster: rule.cluster, target: rule.id })
       return json(rule)
     } catch (e) {
-      return HttpServerResponse.unsafeJson({ error: e instanceof Error ? e.message : String(e) }, { status: e instanceof ActionError ? e.status : 400 })
+      return unsafeJson({ error: e instanceof Error ? e.message : String(e) }, { status: e instanceof ActionError ? e.status : 400 })
     }
   }))),
-  HttpRouter.patch("/api/alerts/:id", Effect.flatMap(reqWithBody, (p) => Effect.sync(() => {
+  HttpRouter.route("PATCH", "/api/alerts/:id", Effect.flatMap(reqWithBody, (p) => Effect.sync(() => {
     try {
       assertWritable(config.readonly)
       if (role === "viewer") throw new ActionError("operator role required", 403)
@@ -335,10 +349,10 @@ const opsRouter = HttpRouter.empty.pipe(
       recordAudit({ actor, role, action: "alert-update", cluster: rule.cluster, target: rule.id })
       return json(rule)
     } catch (e) {
-      return HttpServerResponse.unsafeJson({ error: e instanceof Error ? e.message : String(e) }, { status: e instanceof ActionError ? e.status : 400 })
+      return unsafeJson({ error: e instanceof Error ? e.message : String(e) }, { status: e instanceof ActionError ? e.status : 400 })
     }
   }))),
-  HttpRouter.del("/api/alerts/:id", Effect.flatMap(req, (p) => Effect.sync(() => {
+  HttpRouter.route("DELETE", "/api/alerts/:id", Effect.flatMap(req, (p) => Effect.sync(() => {
     try {
       assertWritable(config.readonly)
       if (role === "viewer") throw new ActionError("operator role required", 403)
@@ -347,10 +361,10 @@ const opsRouter = HttpRouter.empty.pipe(
       if (ok) recordAudit({ actor, role, action: "alert-delete", cluster: alertCluster(id), target: id })
       return json({ ok })
     } catch (e) {
-      return HttpServerResponse.unsafeJson({ error: e instanceof Error ? e.message : String(e) }, { status: e instanceof ActionError ? e.status : 400 })
+      return unsafeJson({ error: e instanceof Error ? e.message : String(e) }, { status: e instanceof ActionError ? e.status : 400 })
     }
   }))),
-  HttpRouter.post("/api/alerts/:id/test", Effect.flatMap(req, (p) => Effect.tryPromise(async () => {
+  HttpRouter.route("POST", "/api/alerts/:id/test", Effect.flatMap(req, (p) => Effect.tryPromise(async () => {
     try {
       assertWritable(config.readonly)
       if (role === "viewer") throw new ActionError("operator role required", 403)
@@ -359,16 +373,16 @@ const opsRouter = HttpRouter.empty.pipe(
       recordAudit({ actor, role, action: "alert-test", cluster: alertCluster(id), target: id })
       return json(result)
     } catch (e) {
-      return HttpServerResponse.unsafeJson({ error: e instanceof Error ? e.message : String(e) }, { status: e instanceof ActionError ? e.status : 400 })
+      return unsafeJson({ error: e instanceof Error ? e.message : String(e) }, { status: e instanceof ActionError ? e.status : 400 })
     }
   }))),
-  HttpRouter.get("/api/audit", Effect.flatMap(req, (p) => Effect.succeed(json(listAudit(intParam(p.limit))))))
-)
+  HttpRouter.route("GET", "/api/audit", Effect.flatMap(req, (p) => Effect.succeed(json(listAudit(intParam(p.limit))))))
+]
 
-const baseRouter = HttpRouter.empty.pipe(
-  HttpRouter.get("/healthz", HttpServerResponse.text("ok")),
+const baseRoutes = [
+  HttpRouter.route("GET", "/healthz", HttpServerResponse.text("ok")),
 
-  HttpRouter.get(
+  HttpRouter.route("GET", 
     "/api/config",
     Effect.succeed(
       json({
@@ -381,12 +395,12 @@ const baseRouter = HttpRouter.empty.pipe(
     )
   ),
 
-  HttpRouter.get(
+  HttpRouter.route("GET", 
     "/api/clusters",
     Effect.succeed(json([...repos.keys()].map((name) => ({ name }))))
   ),
 
-  HttpRouter.get(
+  HttpRouter.route("GET", 
     "/api/overview",
     Effect.flatMap(req, (p) => {
       const repo = repoFor(p.cluster)
@@ -395,7 +409,7 @@ const baseRouter = HttpRouter.empty.pipe(
     })
   ),
 
-  HttpRouter.get(
+  HttpRouter.route("GET", 
     "/api/runners",
     Effect.flatMap(req, (p) => {
       const repo = repoFor(p.cluster)
@@ -404,7 +418,7 @@ const baseRouter = HttpRouter.empty.pipe(
     })
   ),
 
-  HttpRouter.get(
+  HttpRouter.route("GET", 
     "/api/shards",
     Effect.flatMap(req, (p) => {
       const repo = repoFor(p.cluster)
@@ -413,7 +427,7 @@ const baseRouter = HttpRouter.empty.pipe(
     })
   ),
 
-  HttpRouter.get(
+  HttpRouter.route("GET", 
     "/api/entities",
     Effect.flatMap(req, (p) => {
       const repo = repoFor(p.cluster)
@@ -422,7 +436,7 @@ const baseRouter = HttpRouter.empty.pipe(
     })
   ),
 
-  HttpRouter.get(
+  HttpRouter.route("GET", 
     "/api/entity-instances",
     Effect.flatMap(req, (p) => {
       const repo = repoFor(p.cluster)
@@ -437,7 +451,7 @@ const baseRouter = HttpRouter.empty.pipe(
     })
   ),
 
-  HttpRouter.get(
+  HttpRouter.route("GET", 
     "/api/crons",
     Effect.flatMap(req, (p) => {
       const repo = repoFor(p.cluster)
@@ -446,7 +460,7 @@ const baseRouter = HttpRouter.empty.pipe(
     })
   ),
 
-  HttpRouter.get(
+  HttpRouter.route("GET", 
     "/api/singletons",
     Effect.flatMap(req, (p) => {
       const repo = repoFor(p.cluster)
@@ -455,7 +469,7 @@ const baseRouter = HttpRouter.empty.pipe(
     })
   ),
 
-  HttpRouter.get(
+  HttpRouter.route("GET", 
     "/api/messages",
     Effect.flatMap(req, (p) => {
       const repo = repoFor(p.cluster)
@@ -487,7 +501,7 @@ const baseRouter = HttpRouter.empty.pipe(
     })
   ),
 
-  HttpRouter.get(
+  HttpRouter.route("GET", 
     "/api/messages/:id",
     Effect.flatMap(req, (p) =>
       Effect.tryPromise(async (): Promise<HttpServerResponse.HttpServerResponse> => {
@@ -499,7 +513,7 @@ const baseRouter = HttpRouter.empty.pipe(
     )
   ),
 
-  HttpRouter.get(
+  HttpRouter.route("GET", 
     "/api/workflows",
     Effect.flatMap(req, (p) => {
       const repo = repoFor(p.cluster)
@@ -508,7 +522,7 @@ const baseRouter = HttpRouter.empty.pipe(
     })
   ),
 
-  HttpRouter.get(
+  HttpRouter.route("GET", 
     "/api/workflows/:name",
     Effect.flatMap(req, (p) => {
       const repo = repoFor(p.cluster)
@@ -517,7 +531,7 @@ const baseRouter = HttpRouter.empty.pipe(
     })
   ),
 
-  HttpRouter.get(
+  HttpRouter.route("GET", 
     "/api/workflows/:name/:executionId",
     Effect.flatMap(req, (p) =>
       Effect.tryPromise(async (): Promise<HttpServerResponse.HttpServerResponse> => {
@@ -532,21 +546,21 @@ const baseRouter = HttpRouter.empty.pipe(
   ),
 
   // ------------------------------------------------------------------ actions
-  HttpRouter.post("/api/actions/retry", actionHandler((repo, id) => retryMessage(repo.db, repo.prefix, id), "retry")),
-  HttpRouter.post(
+  HttpRouter.route("POST", "/api/actions/retry", actionHandler((repo, id) => retryMessage(repo.db, repo.prefix, id), "retry")),
+  HttpRouter.route("POST", 
     "/api/actions/interrupt",
     actionHandler((repo, id) => interruptMessage(repo.db, repo.prefix, id), "interrupt")
   ),
-  HttpRouter.post(
+  HttpRouter.route("POST", 
     "/api/actions/reset-activity",
     actionHandler((repo, id) => resetActivity(repo.db, repo.prefix, id), "reset-activity")
   ),
-  HttpRouter.post(
+  HttpRouter.route("POST", 
     "/api/actions/delete",
     actionHandler((repo, id) => deleteMessage(repo.db, repo.prefix, id), "delete")
   ),
-  HttpRouter.post("/api/actions/bulk", bulkActionHandler)
-)
+  HttpRouter.route("POST", "/api/actions/bulk", bulkActionHandler)
+]
 
 /** handler for redis-only operations; sqlite clusters get a clean 400 */
 function redisOnlyHandler(
@@ -564,15 +578,15 @@ function redisOnlyHandler(
           recordAudit({ actor, role, action: "redis-operation", cluster: p.cluster ?? p.body?.cluster ?? config.clusters[0].name, target: typeof p.body?.queue === "string" ? p.body.queue : typeof p.body?.id === "string" ? p.body.id : "redis" })
           return json(result)
         }
-        return HttpServerResponse.unsafeJson(
+        return unsafeJson(
           { error: "not supported for this cluster type" },
           { status: 400 }
         )
       } catch (e) {
         if (e instanceof ActionError) {
-          return HttpServerResponse.unsafeJson({ error: e.message }, { status: e.status })
+          return unsafeJson({ error: e.message }, { status: e.status })
         }
-        return HttpServerResponse.unsafeJson(
+        return unsafeJson(
           { error: e instanceof Error ? e.message : String(e) },
           { status: 500 }
         )
@@ -594,30 +608,30 @@ function numOrUndefined(v: unknown): number | undefined {
   return v !== undefined && v !== "" && Number.isFinite(n) ? n : undefined
 }
 
-const redisRouter = HttpRouter.empty.pipe(
+const redisRoutes = [
   // ------------------------------------------------------- redis queue controls
-  HttpRouter.post(
+  HttpRouter.route("POST", 
     "/api/actions/pause-queue",
     redisOnlyHandler(async (repo, body) => {
       requireString(body, "queue")
       return repo.actions.pauseQueue(body.queue)
     })
   ),
-  HttpRouter.post(
+  HttpRouter.route("POST", 
     "/api/actions/resume-queue",
     redisOnlyHandler(async (repo, body) => {
       requireString(body, "queue")
       return repo.actions.resumeQueue(body.queue)
     })
   ),
-  HttpRouter.post(
+  HttpRouter.route("POST", 
     "/api/actions/promote",
     redisOnlyHandler(async (repo, body) => {
       requireString(body, "id")
       return repo.actions.promote(body.id)
     })
   ),
-  HttpRouter.post(
+  HttpRouter.route("POST", 
     "/api/actions/clean",
     redisOnlyHandler(async (repo, body) => {
       const state = body.state === "failed" ? "failed" : body.state === "*" ? "*" : "completed"
@@ -638,7 +652,7 @@ const redisRouter = HttpRouter.empty.pipe(
       })
     })
   ),
-  HttpRouter.post(
+  HttpRouter.route("POST", 
     "/api/actions/add-job",
     redisOnlyHandler(async (repo, body) => {
       requireString(body, "queue")
@@ -646,7 +660,7 @@ const redisRouter = HttpRouter.empty.pipe(
       return repo.actions.addJob(body.queue, typeof body.name === "string" && body.name !== "" ? body.name : "manual", body.data)
     })
   ),
-  HttpRouter.get(
+  HttpRouter.route("GET", 
     "/api/queues",
     Effect.flatMap(req, (params) =>
       Effect.flatMap(
@@ -659,33 +673,33 @@ const redisRouter = HttpRouter.empty.pipe(
       )
     )
   ),
-  HttpRouter.get(
+  HttpRouter.route("GET", 
     "/api/queues/:name/jobs",
     Effect.flatMap(req, (p) => {
       const repo = repoFor(p.cluster)
       if (!repo) return Effect.succeed(notFound("cluster"))
       if (repoKind(repo) !== "redis" || !(repo as unknown as RedisRepoExtras).queueJobs) {
         return Effect.succeed(
-          HttpServerResponse.unsafeJson({ error: "queue jobs are only supported for redis clusters" }, { status: 400 })
+          unsafeJson({ error: "queue jobs are only supported for redis clusters" }, { status: 400 })
         )
       }
       const state = p.state
       if (state !== "wait" && state !== "active" && state !== "delayed" && state !== "completed" && state !== "failed") {
-        return Effect.succeed(HttpServerResponse.unsafeJson({ error: "state must be wait | active | delayed | completed | failed" }, { status: 400 }))
+        return Effect.succeed(unsafeJson({ error: "state must be wait | active | delayed | completed | failed" }, { status: 400 }))
       }
       const limit = intParam(p.limit)
       const offset = intParam(p.offset)
       return Effect.tryPromise(async () => json(await (repo as unknown as RedisRepoExtras).queueJobs(decodeURIComponent(p.name!), state, limit, offset)))
     })
   ),
-  HttpRouter.get(
+  HttpRouter.route("GET", 
     "/api/queue-jobs/:id",
     Effect.flatMap(req, (p) => {
       const repo = repoFor(p.cluster)
       if (!repo) return Effect.succeed(notFound("cluster"))
       if (repoKind(repo) !== "redis" || !(repo as unknown as RedisRepoExtras).jobDetail) {
         return Effect.succeed(
-          HttpServerResponse.unsafeJson({ error: "queue jobs are only supported for redis clusters" }, { status: 400 })
+          unsafeJson({ error: "queue jobs are only supported for redis clusters" }, { status: 400 })
         )
       }
       return Effect.tryPromise(async () => {
@@ -694,14 +708,14 @@ const redisRouter = HttpRouter.empty.pipe(
       })
     })
   ),
-  HttpRouter.get(
+  HttpRouter.route("GET", 
     "/api/job-tree/:id",
     Effect.flatMap(req, (p) => {
       const repo = repoFor(p.cluster)
       if (!repo) return Effect.succeed(notFound("cluster"))
       if (repoKind(repo) !== "redis" || !(repo as unknown as RedisRepoExtras).jobTree) {
         return Effect.succeed(
-          HttpServerResponse.unsafeJson({ error: "not supported for this cluster type" }, { status: 400 })
+          unsafeJson({ error: "not supported for this cluster type" }, { status: 400 })
         )
       }
       return Effect.tryPromise(async () => {
@@ -710,16 +724,16 @@ const redisRouter = HttpRouter.empty.pipe(
       })
     })
   )
-)
+]
 
-const agentRouter = HttpRouter.empty.pipe(
+const agentRoutes = [
   // ------------------------------------------------------------- agent (MCP + chat)
-  HttpRouter.post(
+  HttpRouter.route("POST", 
     "/mcp",
     Effect.flatMap(reqWithBody, (p) =>
       Effect.tryPromise(() => handleMcpRequest(p.body, repoFor, config.clusters[0].name)).pipe(
         Effect.map((outcome) =>
-          HttpServerResponse.unsafeJson(outcome.body, {
+          unsafeJson(outcome.body, {
             status: outcome.status,
             contentType: "application/json"
           })
@@ -728,7 +742,7 @@ const agentRouter = HttpRouter.empty.pipe(
     )
   ),
 
-  HttpRouter.post(
+  HttpRouter.route("POST", 
     "/api/agent/stream",
     Effect.flatMap(reqWithBody, (p) =>
       Effect.tryPromise(async () => {
@@ -737,10 +751,10 @@ const agentRouter = HttpRouter.empty.pipe(
         const provider = body.provider === "anthropic" ? "anthropic" : "openai"
         const modelId = typeof body.model === "string" && body.model.trim() !== "" ? body.model.trim() : null
         if (!apiKey) {
-          return HttpServerResponse.unsafeJson({ error: "missing apiKey in request body" }, { status: 401 })
+          return unsafeJson({ error: "missing apiKey in request body" }, { status: 401 })
         }
         if (!modelId) {
-          return HttpServerResponse.unsafeJson({ error: "missing model in request body" }, { status: 400 })
+          return unsafeJson({ error: "missing model in request body" }, { status: 400 })
         }
         const selectedCluster = typeof body.cluster === "string" && body.cluster !== "" ? body.cluster : config.clusters[0].name
         const repo = repoFor(selectedCluster)
@@ -753,7 +767,7 @@ const agentRouter = HttpRouter.empty.pipe(
               createAnthropic({ apiKey })(modelId) :
               createOpenAI({ apiKey })(modelId)
         } catch (e) {
-          return HttpServerResponse.unsafeJson(
+          return unsafeJson(
             { error: `provider init failed: ${e instanceof Error ? e.message : String(e)}` },
             { status: 400 }
           )
@@ -786,12 +800,12 @@ const agentRouter = HttpRouter.empty.pipe(
       })
     )
   )
-)
+]
 
-export const api = HttpRouter.concat(HttpRouter.concat(HttpRouter.concat(baseRouter, opsRouter), redisRouter), agentRouter).pipe(
+const extraRoutes = [
   // Prometheus scrape endpoint — outside /api/* so the auth middleware's
   // static exemption covers it (same treatment as /healthz)
-  HttpRouter.get(
+  HttpRouter.route("GET",
     "/metrics",
     Effect.succeed(
       HttpServerResponse.text(metrics.prometheus(), {
@@ -800,7 +814,7 @@ export const api = HttpRouter.concat(HttpRouter.concat(HttpRouter.concat(baseRou
     )
   ),
 
-  HttpRouter.get(
+  HttpRouter.route("GET", 
     "/api/traces",
     Effect.flatMap(req, (p) => {
       const repo = repoFor(p.cluster)
@@ -809,7 +823,7 @@ export const api = HttpRouter.concat(HttpRouter.concat(HttpRouter.concat(baseRou
     })
   ),
 
-  HttpRouter.get(
+  HttpRouter.route("GET", 
     "/api/traces/:traceId/events",
     Effect.flatMap(req, (p) => {
       const repo = repoFor(p.cluster)
@@ -835,11 +849,11 @@ export const api = HttpRouter.concat(HttpRouter.concat(HttpRouter.concat(baseRou
     })
   ),
 
-  HttpRouter.get(
+  HttpRouter.route("GET", 
     "/api/traces/:traceId",
     Effect.flatMap(req, (p) => {
       const repo = repoFor(p.cluster)
-      if (!repo || !p.traceId) return notFound(p.traceId ? "cluster" : "traceId")
+      if (!repo || !p.traceId) return Effect.succeed(notFound(p.traceId ? "cluster" : "traceId"))
       const traceId = decodeURIComponent(p.traceId)
       return Effect.map(Effect.tryPromise(() => Promise.resolve(repo.trace(traceId))), (rows) =>
         rows.length === 0 ? notFound("trace") : json({ traceId, rows })
@@ -847,7 +861,7 @@ export const api = HttpRouter.concat(HttpRouter.concat(HttpRouter.concat(baseRou
     })
   ),
 
-  HttpRouter.get(
+  HttpRouter.route("GET", 
     "/api/logs",
     Effect.flatMap(req, (p) => {
       const repo = repoFor(p.cluster)
@@ -860,7 +874,7 @@ export const api = HttpRouter.concat(HttpRouter.concat(HttpRouter.concat(baseRou
     })
   ),
 
-  HttpRouter.get(
+  HttpRouter.route("GET", 
     "/api/fibers",
     Effect.flatMap(req, (p) => {
       const repo = repoFor(p.cluster)
@@ -870,7 +884,7 @@ export const api = HttpRouter.concat(HttpRouter.concat(HttpRouter.concat(baseRou
   ),
 
   // ------------------------------------------------------- metrics & realtime
-  HttpRouter.get(
+  HttpRouter.route("GET", 
     "/api/metrics/history",
     Effect.map(req, (p) => {
       // known cluster without samples yet -> empty series (fresh boots), else 404
@@ -885,7 +899,7 @@ export const api = HttpRouter.concat(HttpRouter.concat(HttpRouter.concat(baseRou
     })
   ),
 
-  HttpRouter.get(
+  HttpRouter.route("GET", 
     "/api/events",
     Effect.map(req, (p) => {
       const repo = repoFor(p.cluster) ?? defaultRepo
@@ -911,7 +925,7 @@ export const api = HttpRouter.concat(HttpRouter.concat(HttpRouter.concat(baseRou
     })
   ),
 
-  HttpRouter.post(
+  HttpRouter.route("POST", 
     "/api/auth",
     Effect.map(HttpServerRequest.HttpServerRequest, (req) =>
       Effect.map(
@@ -919,12 +933,12 @@ export const api = HttpRouter.concat(HttpRouter.concat(HttpRouter.concat(baseRou
         (body: any) => {
           const verdict = verifyToken(body?.token)
           if (!verdict.ok) {
-            return HttpServerResponse.unsafeJson({ error: verdict.error }, {
+            return unsafeJson({ error: verdict.error }, {
               status: verdict.status,
               headers: { "cache-control": "no-store" }
             })
           }
-          return HttpServerResponse.unsafeJson({ ok: true }, {
+          return unsafeJson({ ok: true }, {
             headers: {
               "cache-control": "no-store",
               "set-cookie": `${AUTH_COOKIE}=${encodeURIComponent(verdict.ok ? body.token : "")}; Path=/; HttpOnly; SameSite=Lax`
@@ -935,7 +949,7 @@ export const api = HttpRouter.concat(HttpRouter.concat(HttpRouter.concat(baseRou
     ).pipe(Effect.flatten)
   ),
 
-  HttpRouter.get(
+  HttpRouter.route("GET", 
     "/assets/*",
     Effect.map(HttpServerRequest.HttpServerRequest, (req) => {
       if (!HAS_DIST) return HttpServerResponse.empty({ status: 404 })
@@ -944,7 +958,7 @@ export const api = HttpRouter.concat(HttpRouter.concat(HttpRouter.concat(baseRou
     })
   ),
 
-  HttpRouter.get(
+  HttpRouter.route("GET", 
     "*",
     Effect.map(HttpServerRequest.HttpServerRequest, (req) => {
       const res = tryStatic(req.url.split("?")[0])
@@ -952,4 +966,13 @@ export const api = HttpRouter.concat(HttpRouter.concat(HttpRouter.concat(baseRou
         HttpServerResponse.text("cluster-ui API is running — build the frontend with `vite build`")
     })
   )
-)
+]
+
+/** all routes for the API + static UI; wire into a server with `HttpRouter.addAll(api)`. */
+export const api = [
+  ...baseRoutes,
+  ...opsRoutes,
+  ...redisRoutes,
+  ...agentRoutes,
+  ...extraRoutes
+]

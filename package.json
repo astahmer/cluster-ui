@@ -1,24 +1,36 @@
 {
   "name": "cluster-ui",
-  "private": true,
   "version": "0.1.0",
+  "description": "Effect Cluster operations dashboard",
   "type": "module",
+  "bin": {
+    "cluster-ui": "./bin/cluster-ui.mjs"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "server/dist",
+    "README.md",
+    "docs"
+  ],
   "scripts": {
-    "dev:server": "node --watch --experimental-transform-types --no-warnings --import ./scripts/register-ts-resolve.mjs server/src/main.ts",
+    "dev:server": "node scripts/dev-server.mjs",
     "dev:web": "vite",
-    "build": "vite build",
-    "start": "node --experimental-transform-types --no-warnings --import ./scripts/register-ts-resolve.mjs server/src/main.ts",
-    "seed": "node --experimental-transform-types --no-warnings --import ./scripts/register-ts-resolve.mjs server/src/seed.ts",
+    "build:server": "node scripts/build-server.mjs",
+    "build": "pnpm build:server && vite build",
+    "start": "node server/dist/main.cjs",
+    "seed": "node server/src/seed.ts",
     "typecheck": "bash -c 'out=$(tsc --noEmit --pretty false 2>&1); filtered=$(echo \"$out\" | grep -E \"^(server|web|vite\\\\.config|index\\\\.html)\"); if [ -n \"$filtered\" ]; then echo \"$filtered\"; exit 1; fi'",
-    "e2e": "node --experimental-transform-types --no-warnings --import ./scripts/register-ts-resolve.mjs server/scripts/e2e.ts",
+    "e2e": "pnpm build && node server/scripts/e2e.ts",
     "smoke": "node web/smoke.mjs",
-    "demo-runner": "node --experimental-transform-types --no-warnings --import ./scripts/register-ts-resolve.mjs server/scripts/demo-runner.ts",
+    "test:cli": "node scripts/test-cli.mjs",
+    "demo-runner": "node server/scripts/demo-runner.ts",
     "dev:redis": "bash scripts/dev-redis.sh",
     "seed:redis": "node scripts/demo-redis.mjs",
     "redis:cli": "redis-cli -p 6399",
-    "dev": "bash scripts/dev-all.sh",
+    "dev": "node scripts/dev-all.mjs",
     "e2e:browser": "node scripts/browser-e2e.mjs",
-    "e2e:bdd": "bddgen && playwright test",
+    "e2e:bdd": "pnpm build && bddgen && playwright test",
     "e2e:bdd:generate": "bddgen",
     "try:redis": "bash scripts/try-redis.sh"
   },
@@ -27,11 +39,6 @@
     "@ai-sdk/openai": "4.0.46",
     "@ai-sdk/react": "4.0.80",
     "@base-ui/react": "1.7.0",
-    "@effect/platform": "link:../effect/packages/platform",
-    "@effect/platform-node": "link:../effect/packages/platform-node",
-    "@effect/platform-node-shared": "link:../effect/packages/platform-node-shared",
-    "@effect/sql": "link:../effect/packages/sql",
-    "@effect/sql-sqlite-node": "link:../effect/packages/sql-sqlite-node",
     "@opentelemetry/semantic-conventions": "1.43.0",
     "@parcel/watcher": "2.6.0",
     "@phosphor-icons/react": "2.1.10",
@@ -41,12 +48,7 @@
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "cnfast": "0.1.0",
-    "effect": "link:../effect/packages/effect",
-    "find-my-way-ts": "0.1.6",
     "ioredis": "6.0.0",
-    "mime": "4.1.0",
-    "msgpackr": "2.0.5",
-    "multipasta": "0.2.8",
     "postgres": "3.4.9",
     "react": "19.2.8",
     "react-dom": "19.2.8",
@@ -58,6 +60,9 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
+    "@effect/platform-node": "4.0.0-rc.112",
+    "@effect/platform-node-shared": "4.0.0-rc.112",
+    "effect": "4.0.0-rc.112",
     "@playwright/test": "1.62.1",
     "@tailwindcss/vite": "4.3.3",
     "@types/better-sqlite3": "9.6.0",
@@ -69,6 +74,7 @@
     "playwright-bdd": "9.2.0",
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
-    "vite": "8.2.2"
+    "vite": "8.2.2",
+    "esbuild": "0.28.2"
   }
 }
