@@ -9,7 +9,7 @@ Reads the same SQL storage your cluster writes to (`SqlShardStorage` +
 tables) — no changes to your app needed. The UI is React + Tailwind with
 [shadcn](https://ui.shadcn.com)-style components, styled with accents from
 [kumo-ui](https://kumo-ui.com). The API server is Effect v4
-(`@effect/platform` + `@effect/platform-node`).
+(`effect/unstable/http` + `@effect/platform-node`).
 
 ## Quick start (demo)
 
@@ -41,26 +41,34 @@ dashboard: write actions are disabled for these profiles. The adapter tolerates
 Effect Cluster database versions that do not have a persisted `cluster_shards`
 table and reports shard assignments as empty in that case.
 
-### TL;DR: start cluster-ui from any repo
+### TL;DR: start cluster-ui from any workspace
 
-For a local Effect Cluster, run these commands from any directory:
+Build or install cluster-ui, then run it from the application workspace whose
+relative data paths should be used:
 
 ```sh
-cd ~/dev/cluster-ui
-CLUSTER_UI_CLUSTERS='my-app=postgres://user:password@127.0.0.1:5438/db_dev' \
-CLUSTER_UI_READONLY=1 pnpm dev
+cd ~/dev/my-app
+CLUSTER_UI_READONLY=1 cluster-ui ./data/cluster.db
 ```
 
-Open <http://localhost:5173>. This starts the Vite UI on `5173`, proxies its
-API to cluster-ui on `8787`, and reads the My-app `db_dev` cluster tables on
-PostgreSQL `5438`. Keep the terminal open; press `Ctrl-C` to stop both
-processes. For a built single-process server, use `pnpm build` once and then
-replace `pnpm dev` with `pnpm start` and open <http://localhost:8787>.
+The command launches the prebuilt UI and API in one process. The process cwd is
+`~/dev/my-app`, while the frontend assets come from the installed cluster-ui
+package. The target can also be a PostgreSQL or Redis URL:
+
+```sh
+cluster-ui 'postgres://user:password@127.0.0.1:5438/db_dev'
+cluster-ui 'redis://127.0.0.1:6379'
+```
+
+For advanced multi-cluster setups, omit the argument and set
+`CLUSTER_UI_CLUSTERS` as documented above. Do not combine it with a positional
+target. Use `CLUSTER_UI_TARGET` when an environment-only single target is more
+convenient; it has the same value format as the positional argument.
 
 ## Development
 
 ```sh
-pnpm dev:server   # API only, node --watch on :8787 (native TS, no tsx)
+pnpm dev:server   # API only, bundled server watch on :8787
 pnpm dev:web      # vite dev server (proxies /api to :8787)
 ```
 
@@ -126,7 +134,8 @@ one cached.
 - `kumo-ui`'s published JS bundle embeds its own copy of React and crashes when
   mixed with ours, so we reuse only its stylesheet (aliased via
   `kumo-ui/styles.css`) and hand-roll shadcn-flavored components on Tailwind.
-- The effect v4 packages are linked from a local checkout of the monorepo
-  (`link:../effect/packages/...`). That checkout needs its workspace deps
-  installed once (`pnpm install` inside it) because its sources import bare
-  specifiers at runtime.
+- The Effect v4 packages (`effect`, `@effect/platform-node`,
+  `@effect/platform-node-shared`) are installed from npm's `rc` dist-tag —
+  no linked monorepo checkout or `--experimental-transform-types` flag needed.
+  Node 24 runs the `.ts` sources directly (native type stripping); `esbuild`
+  bundles `server/src/main.ts` into `server/dist/main.cjs` for the packaged CLI.

@@ -20,7 +20,10 @@ Redis endpoint.
 For a production installation:
 
 - run `pnpm build` during the release step;
-- run `pnpm start` as a long-lived service;
+- install or copy the resulting package, including `bin/`, `server/dist/`, and
+  `dist/`;
+- run `cluster-ui <target>` as a long-lived service from the workspace whose
+  relative data paths should be used;
 - bind the process to a private interface and put TLS/authentication at the
   reverse proxy or network boundary;
 - set `CLUSTER_UI_READONLY=1` unless operators explicitly need dashboard
@@ -35,18 +38,11 @@ For a production installation:
   survive restarts;
 - an HTTPS reverse proxy if the dashboard is reachable beyond localhost.
 
-The current repository uses local `link:../effect` dependencies. A source
-checkout therefore needs the matching Effect repository next to cluster-ui:
-
-```text
-/opt/effect
-/opt/cluster-ui
-```
-
-If deploying from a packaged artifact or a different monorepo layout, replace
-those local dependency links with published Effect packages before installing.
-Do not copy only `dist/`: the server and its runtime dependencies are still
-required.
+Effect v4 packages are installed from npm (the `rc` dist-tag) like any other
+dependency — no sibling monorepo checkout is required. `pnpm install` followed
+by `pnpm build` works from a plain packaged artifact. Do not copy only
+`dist/`: the server bundle (`server/dist/main.cjs`) and its runtime
+dependencies are still required.
 
 ## Build and verify a release
 
@@ -144,7 +140,7 @@ User=cluster-ui
 Group=cluster-ui
 WorkingDirectory=/opt/cluster-ui
 EnvironmentFile=/etc/cluster-ui/cluster-ui.env
-ExecStart=/usr/bin/pnpm start
+ExecStart=/usr/local/bin/cluster-ui
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true
@@ -273,9 +269,9 @@ cd ~/dev/cluster-ui
 pnpm install --frozen-lockfile
 pnpm run typecheck
 pnpm run build
-CLUSTER_UI_CLUSTERS='emisoup=postgres://user:password@127.0.0.1:5438/db_dev' \
+CLUSTER_UI_TARGET='postgres://user:password@127.0.0.1:5438/db_dev' \
 CLUSTER_UI_READONLY=1 \
-pnpm start
+cluster-ui
 ```
 
 Open <http://localhost:8787>. Stop it with `Ctrl-C`. For iterative local
