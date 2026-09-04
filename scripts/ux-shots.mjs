@@ -41,9 +41,8 @@ try {
 } catch {}
 const clusters = `default=${resolve(ROOT, "data/cluster.db")},local-redis=redis://127.0.0.1:${REDIS_PORT}`
 const apiPort = PORT + 1
-const apiProc = spawn("node",
-  ["--experimental-transform-types", "--no-warnings", "--import", "./scripts/register-ts-resolve.mjs", "server/src/main.ts"],
-  { cwd: ROOT, env: { ...process.env, PORT: String(apiPort), CLUSTER_UI_CLUSTERS: clusters }, stdio: "ignore" }
+const apiProc = spawn(process.execPath, ["server/dist/main.cjs"],
+  { cwd: ROOT, env: { ...process.env, PORT: String(apiPort), CLUSTER_UI_DIST: DIST, CLUSTER_UI_CLUSTERS: clusters }, stdio: "ignore" }
 )
 let apiUp = false
 for (let i = 0; i < 40 && !apiUp; i++) {

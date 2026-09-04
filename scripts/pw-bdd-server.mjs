@@ -30,8 +30,7 @@ const redis = spawn("redis-server", ["--port", String(redisPort), "--daemonize",
 })
 await wait(500)
 
-const nodeArgs = ["--experimental-transform-types", "--no-warnings", "--import", "./scripts/register-ts-resolve.mjs"]
-const seed = spawn(process.execPath, [...nodeArgs, "server/src/seed.ts"], {
+const seed = spawn(process.execPath, ["server/src/seed.ts"], {
   cwd: ROOT,
   env: { ...process.env, CLUSTER_UI_DB: db, CLUSTER_UI_STATE_FILE: state },
   stdio: "inherit"
@@ -48,12 +47,13 @@ execFileSync(process.execPath, ["scripts/demo-redis.mjs"], {
   stdio: "inherit"
 })
 
-const server = spawn(process.execPath, [...nodeArgs, "server/src/main.ts"], {
+const server = spawn(process.execPath, ["server/dist/main.cjs"], {
   cwd: ROOT,
   env: {
     ...process.env,
     PORT: String(PORT),
     CLUSTER_UI_DB: db,
+    CLUSTER_UI_DIST: resolve(ROOT, "dist"),
     CLUSTER_UI_STATE_FILE: state,
     CLUSTER_UI_CLUSTERS: `default=${db},local-redis=redis://127.0.0.1:${redisPort}`
   },

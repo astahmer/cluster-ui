@@ -16,7 +16,8 @@
       in {
         default = pkgs.mkShell {
           packages = [
-            pkgs.nodejs_24 # native TS (--experimental-transform-types), no tsx
+            pkgs.nodejs_24
+
             pkgs.pnpm
             # better-sqlite3 native builds (node-gyp)
             pkgs.python3
